@@ -1,0 +1,13 @@
+# Python environment and caches (rebuilt from requirements.txt)
+.venv/
+__pycache__/
+*.pyc
+
+# Generated outputs (regenerable by running the script)
+river_tide*.html
+river_tide*.csv
+
+# IDE and tool state that is machine-specific
+.idea/
+.claude/settings.local.json
+.mcp.json
