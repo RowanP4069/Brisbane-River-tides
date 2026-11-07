@@ -1,15 +1,15 @@
 name,lat,lon,chainage_km,lag_min,lag_hw_min,lag_lw_min,ratio,note
-Brisbane Bar,-27.3667,153.1667,0,0.0,0,0,1.0,Published ratio.
-Boat Passage,-27.4,153.1667,3.7,0.0,0,0,1.0,Published ratio.
-Pinkenba,-27.4333,153.1167,9.9,13.5,11,16,1.04,Published ratio.
-Cairncross Dock,-27.45,153.0833,13.7,21.0,18,24,1.06,Published ratio.
-New Farm,-27.4667,153.05,17.4,25.0,25,25,1.06,Published ratio.
-Port Office (Edward St Ferry),-27.4667,153.0333,19.1,35.5,35,36,1.03,Published ratio.
-Tennyson (Long Pocket),-27.5333,153.0,27.2,70.0,60,80,1.09,Published ratio.
-Indooroopilly,-27.5167,152.9833,29.7,92.5,80,105,1.08,Published ratio.
-Seventeen Mile Rocks,-27.55,152.9667,33.7,80.0,80,80,1.11,"** non-linear transfer, no published ratio. Ratio DERIVED = mean of spring (1.05) and neap (1.17) range ratios vs Bar."
-Wacol (Wolston Creek),-27.5667,152.9,40.5,115.0,115,115,1.16,"** non-linear transfer, no published ratio. Ratio DERIVED = mean of spring (1.06) and neap (1.25) range ratios vs Bar."
-Goodna (Woogaroo Creek),-27.6,152.9,44.2,126.5,123,130,1.15,"** non-linear transfer, no published ratio. Ratio DERIVED = mean of spring (1.06) and neap (1.24) range ratios vs Bar."
-Moggill Ferry,-27.6,152.85,49.2,147.0,141,153,1.26,"** non-linear transfer, no published ratio. Ratio DERIVED = mean of spring (1.14) and neap (1.38) range ratios vs Bar."
-Kholo Creek,-27.5333,152.85,56.6,160.0,150,170,1.25,"** non-linear transfer, no published ratio. Ratio DERIVED = mean of spring (1.10) and neap (1.41) range ratios vs Bar."
+Brisbane Bar,-27.4016,153.1574,0.0,0.0,0,0,1.0,Published ratio.
+Boat Passage,-27.4,153.1667,0.0,0.0,0,0,1.0,Published ratio.
+Pinkenba,-27.4333,153.1167,5.5,13.5,11,16,1.04,Published ratio.
+Cairncross Dock,-27.45,153.0833,9.3,21.0,18,24,1.06,Published ratio.
+New Farm,-27.4667,153.05,15.5,25.0,25,25,1.06,Published ratio.
+Port Office (Edward St Ferry),-27.4667,153.0333,19.9,35.5,35,36,1.03,Published ratio.
+Tennyson (Long Pocket),-27.5333,153.0,35.9,70.0,60,80,1.09,Published ratio.
+Indooroopilly,-27.5167,152.9833,37.6,92.5,80,105,1.08,Published ratio.
+Seventeen Mile Rocks,-27.55,152.9667,44.7,80.0,80,80,1.11,"** non-linear transfer, no published ratio. Ratio DERIVED = mean of spring (1.05) and neap (1.17) range ratios vs Bar."
+Wacol (Wolston Creek),-27.5667,152.9,56.5,115.0,115,115,1.16,"** non-linear transfer, no published ratio. Ratio DERIVED = mean of spring (1.06) and neap (1.25) range ratios vs Bar."
+Goodna (Woogaroo Creek),-27.6,152.9,61.7,126.5,123,130,1.15,"** non-linear transfer, no published ratio. Ratio DERIVED = mean of spring (1.06) and neap (1.24) range ratios vs Bar."
+Moggill Ferry,-27.6,152.85,68.6,147.0,141,153,1.26,"** non-linear transfer, no published ratio. Ratio DERIVED = mean of spring (1.14) and neap (1.38) range ratios vs Bar."
+Kholo Creek,-27.5333,152.85,75.8,160.0,150,170,1.25,"** non-linear transfer, no published ratio. Ratio DERIVED = mean of spring (1.10) and neap (1.41) range ratios vs Bar."
 Mt Crosby Weir,,,,,,,,Tidal limit. NOT in MSQ 2026 planes; nearest listed point is Kholo Creek. Fill in only from a source.
