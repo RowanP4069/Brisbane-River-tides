@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brisbane River Tides</title>
+<!-- Pinned library versions. Both need internet; map tiles do too. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/deck.gl@9.4.1/dist.min.js"></script>
+<style>
+  :root { --fg:#1d2329; --muted:#5d6873; --line:#d5dbe0; --bg:#f6f7f8; --panel:#ffffff; --accent:#1f6fb2; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display:flex; flex-direction:column; }
+  header { padding:8px 16px; display:flex; flex-wrap:wrap; gap:4px 16px; align-items:baseline; }
+  header h1 { font-size:16px; margin:0; }
+  header .sub { color:var(--muted); font-size:12px; }
+  #map { position:relative; flex: 1 1 58vh; min-height:300px; }
+  #controls { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; padding:8px 16px;
+    background:var(--panel); border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  #controls label { display:flex; gap:6px; align-items:center; color:var(--muted); font-size:12px; }
+  #controls select, #controls button { font:inherit; }
+  #time { flex: 1 1 260px; display:flex; gap:8px; align-items:center; }
+  #time input { flex:1; }
+  #clock { font-variant-numeric: tabular-nums; min-width: 15ch; font-weight:600; }
+  #play { width: 5.5em; }
+  #legend { display:flex; gap:10px; align-items:center; font-size:12px; color:var(--muted); }
+  #legend .sw { display:inline-block; width:12px; height:12px; border-radius:2px; vertical-align:-2px; margin-right:4px; }
+  #legend .ramp { width:120px; height:10px; border-radius:2px; }
+  #profileWrap { position:relative; flex: 0 0 30vh; min-height:200px; background:var(--panel); }
+  #profile { width:100%; height:100%; display:block; }
+  #ptip { position:absolute; pointer-events:none; background:rgba(29,35,41,.92); color:#fff; padding:4px 8px;
+    border-radius:4px; font-size:12px; display:none; white-space:nowrap; }
+  footer { padding:6px 16px 10px; font-size:11px; color:var(--muted); }
+  footer p { margin:2px 0; }
+  .warn { color:#8a4b00; }
+  .deck-tooltip { font-size:12px !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Brisbane River tides: Brisbane Bar to Kholo Creek</h1>
+  <span class="sub" id="subtitle"></span>
+</header>
+
+<div id="map"></div>
+
+<div id="controls">
+  <div id="time">
+    <button id="play" type="button">▶ Play</button>
+    <input id="slider" type="range" min="0" step="1" value="0" aria-label="Time">
+    <span id="clock"></span>
+  </div>
+  <label>Speed
+    <select id="speed"><option value="2">slow</option><option value="5" selected>normal</option><option value="12">fast</option></select>
+  </label>
+  <label>Colour
+    <select id="colour">
+      <option value="dir" selected>Rising / falling</option>
+      <option value="rate">Rate of change</option>
+      <option value="slope">Surface slope</option>
+    </select>
+  </label>
+  <label>Height
+    <select id="base">
+      <option value="lat" selected>Above local LAT</option>
+      <option value="msl">Minus local MSL</option>
+      <option value="min">Above 24 h minimum</option>
+    </select>
+  </label>
+  <label>Bar scale
+    <input id="exag" type="range" min="500" max="5000" step="100" value="2000" aria-label="Vertical exaggeration">
+  </label>
+  <div id="legend"></div>
+</div>
+
+<div id="profileWrap"><canvas id="profile"></canvas><div id="ptip"></div></div>
+
+<footer>
+  <p><b>Predicted astronomical tide only.</b> Excludes river flow, wind, storm surge and dam releases. Colours are
+    <b>proxies</b> for flow direction derived from predicted water level. They are not measured or modelled currents. Not for navigation.</p>
+  <p class="warn">Model limits: upstream of Seventeen Mile Rocks, ratios are estimated, so on big spring tides heights
+    can dip below local LAT. Between Indooroopilly and Seventeen Mile Rocks (km 37.6 to 44.7) the published lags run
+    backwards, so the tide appears to arrive earlier upstream. Heights are on each place's own LAT datum and are not
+    comparable as a water surface; the slope proxy uses the departure from local MSL instead.</p>
+  <p>Data: Brisbane Bar predictions and 2026 tidal planes © State of Queensland (Maritime Safety Queensland), CC BY 4.0.
+    River centreline: Watercourse lines - Queensland © State of Queensland (Department of Resources), CC BY 4.0.
+    Basemap attribution on the map.</p>
+</footer>
+
+<script>
+"use strict";
+// ---- Data, inlined by river_tides.py --------------------------------------------
+const DATA = /*__DATA__*/null;
+
+const P = DATA.points, NP = P.chainage_km.length, NF = DATA.times.length;
+const H = DATA.heights;                       // H[frame][point], m above local LAT
+const dtHours = DATA.meta.step_min / 60;
+const LAG_REVERSED = [37.6, 44.7];            // km, see data/README.md
+
+// ---- Derived series (computed once) ----------------------------------------------
+// localMin[p]: lowest height at p over the window (for the "above 24 h minimum" baseline).
+const localMin = new Float64Array(NP).fill(Infinity);
+for (let f = 0; f < NF; f++) for (let p = 0; p < NP; p++) localMin[p] = Math.min(localMin[p], H[f][p]);
+
+// rate[f][p]: dh/dt in m/h. Central difference; one-sided at the window edges.
+const rate = H.map((row, f) => row.map((_, p) => {
+  const a = Math.max(0, f - 1), b = Math.min(NF - 1, f + 1);
+  return (H[b][p] - H[a][p]) / ((b - a) * dtHours);
+}));
+
+// slope[f][p]: flood-directed surface slope in mm/km, from the anomaly A = h - MSL.
+// x increases upstream, so a surface falling upstream (dA/dx < 0) pushes water upstream.
+// Positive = pushes upstream (flood-ish), negative = pushes downstream (ebb-ish).
+const slope = H.map(row => row.map((_, p) => {
+  const a = Math.max(0, p - 1), b = Math.min(NP - 1, p + 1);
+  const dA = (row[b] - P.msl_m[b]) - (row[a] - P.msl_m[a]);
+  const dx = P.chainage_km[b] - P.chainage_km[a];
+  return -1000 * dA / dx;
+}));
+
+function pct95abs(arr2d) {
+  const v = arr2d.flat().map(Math.abs).sort((x, y) => x - y);
+  return v[Math.floor(0.95 * (v.length - 1))] || 1;
+}
+const RATE_MAX = pct95abs(rate), SLOPE_MAX = pct95abs(slope);
+
+// ---- Baselines --------------------------------------------------------------------
+const BASES = {
+  lat: { label: "m above local LAT", f: (fr, p) => H[fr][p] },
+  msl: { label: "m relative to local MSL", f: (fr, p) => H[fr][p] - P.msl_m[p] },
+  min: { label: "m above 24 h minimum", f: (fr, p) => H[fr][p] - localMin[p] },
+};
+// Each baseline's floor: columns grow up from here so they never go negative.
+for (const b of Object.values(BASES)) {
+  let lo = 0, hi = -Infinity;
+  for (let f = 0; f < NF; f++) for (let p = 0; p < NP; p++) { const v = b.f(f, p); lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  b.floor = lo; b.max = hi;
+}
+
+// ---- Colours ----------------------------------------------------------------------
+const RED = [178, 24, 43], BLUE = [33, 102, 172], MID = [235, 235, 235];
+const C_RISE = [214, 96, 77], C_FALL = [67, 147, 195], C_SLACK = [170, 170, 170];
+const SLACK_MPH = 0.02;                       // |dh/dt| below this counts as near slack
+
+function diverge(v, max) {                    // -max..+max -> blue..grey..red
+  const t = Math.max(-1, Math.min(1, v / max));
+  const end = t >= 0 ? RED : BLUE, k = Math.abs(t);
+  return MID.map((m, i) => Math.round(m + (end[i] - m) * k));
+}
+const COLOURS = {
+  dir: (f, p) => rate[f][p] > SLACK_MPH ? C_RISE : rate[f][p] < -SLACK_MPH ? C_FALL : C_SLACK,
+  rate: (f, p) => diverge(rate[f][p], RATE_MAX),
+  slope: (f, p) => diverge(slope[f][p], SLOPE_MAX),
+};
+const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+
+function renderLegend() {
+  const el = document.getElementById("legend");
+  const ramp = `<span class="sw ramp" style="background:linear-gradient(90deg,${css(BLUE)},${css(MID)},${css(RED)})"></span>`;
+  if (state.colour === "dir") {
+    el.innerHTML = `<span><span class="sw" style="background:${css(C_RISE)}"></span>rising (flood-ish)</span>
+      <span><span class="sw" style="background:${css(C_FALL)}"></span>falling (ebb-ish)</span>
+      <span><span class="sw" style="background:${css(C_SLACK)}"></span>near slack</span>`;
+  } else if (state.colour === "rate") {
+    el.innerHTML = `<span>−${RATE_MAX.toFixed(2)}</span>${ramp}<span>+${RATE_MAX.toFixed(2)} m/h</span>`;
+  } else {
+    el.innerHTML = `<span>ebb −${SLOPE_MAX.toFixed(0)}</span>${ramp}<span>flood +${SLOPE_MAX.toFixed(0)} mm/km</span>`;
+  }
+}
+
+// ---- State ------------------------------------------------------------------------
+const state = { frame: 0, colour: "dir", base: "lat", exag: 2000, playing: false };
+const $ = id => document.getElementById(id);
+const slider = $("slider");
+slider.max = NF - 1;
+
+function fmtTime(iso) {
+  const d = new Date(iso + ":00");            // naive local AEST, displayed as written
+  return d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }) + " " + iso.slice(11, 16);
+}
+$("subtitle").textContent = `Predicted, ${fmtTime(DATA.times[0])} to ${fmtTime(DATA.times[NF - 1])} AEST, `
+  + `${NF} frames every ${DATA.meta.step_min} min, bars every ${(P.chainage_km[1] - P.chainage_km[0]) * 1000} m`;
+
+// ---- Map + deck.gl ----------------------------------------------------------------
+const STYLES = [
+  "https://tiles.openfreemap.org/styles/positron",                       // default, no key
+  "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",      // fallback
+];
+const map = new maplibregl.Map({
+  container: "map", style: STYLES[0],
+  center: [152.975, -27.5], zoom: 10.7, pitch: 55, bearing: -15, maxPitch: 75,
+});
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+let styleFellBack = false;
+map.on("error", e => {
+  // If the default style itself fails to load, switch once to the fallback.
+  if (!styleFellBack && !map.isStyleLoaded()) { styleFellBack = true; map.setStyle(STYLES[1]); }
+});
+
+const idx = Array.from({ length: NP }, (_, i) => i);
+
+// ---- Station callouts (screen space) -----------------------------------------------
+// A marker on the river at each station, with the label hanging straight DOWN the screen
+// on a leader line. Bars grow up the screen, so down is always in front of them, at any
+// rotation or tilt. Labels that would overlap are pushed to the next, longer drop.
+// Drawn as an HTML/SVG overlay and re-laid-out whenever the map moves.
+const DROPS = [34, 58, 82, 106, 130];         // leader lengths to try, px
+const mapEl = document.getElementById("map");
+const calloutLayer = document.createElement("div");
+calloutLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:2;overflow:hidden";
+const svgNS = "http://www.w3.org/2000/svg", leaderSvg = document.createElementNS(svgNS, "svg");
+leaderSvg.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
+calloutLayer.appendChild(leaderSvg);
+mapEl.appendChild(calloutLayer);
+const callouts = DATA.stations.map(s => {
+  const line = document.createElementNS(svgNS, "line");
+  line.setAttribute("stroke", "rgba(29,35,41,.7)"); line.setAttribute("stroke-width", "1.2");
+  const dot = document.createElementNS(svgNS, "circle");
+  dot.setAttribute("r", "4"); dot.setAttribute("fill", "#1d2329");
+  dot.setAttribute("stroke", "#fff"); dot.setAttribute("stroke-width", "1.5");
+  leaderSvg.append(line, dot);
+  const label = document.createElement("div");
+  label.textContent = s.name;
+  label.style.cssText = "position:absolute;font:12px system-ui,sans-serif;color:#1d2329;background:rgba(255,255,255,.93);"
+    + "border:1px solid rgba(29,35,41,.35);border-radius:3px;padding:1px 5px;white-space:nowrap";
+  calloutLayer.appendChild(label);
+  return { s, line, dot, label, w: 0, h: 0 };
+});
+function layoutCallouts() {
+  const W = mapEl.clientWidth, Hm = mapEl.clientHeight, placed = [];
+  const items = callouts.map(c => {
+    if (!c.w) { c.w = c.label.offsetWidth; c.h = c.label.offsetHeight; }
+    const p = map.project([c.s.lon, c.s.lat]);
+    return { c, x: p.x, y: p.y };
+  }).sort((a, b) => a.x - b.x);
+  for (const it of items) {
+    const { c, x, y } = it, show = x > -50 && x < W + 50 && y > -50 && y < Hm + 50;
+    for (const el of [c.line, c.dot]) el.style.display = show ? "" : "none";
+    c.label.style.display = show ? "" : "none";
+    if (!show) continue;
+    // Keep the label inside the map horizontally; choose the first drop that doesn't collide.
+    const left = Math.max(2, Math.min(W - c.w - 2, x - c.w / 2));
+    let drop = DROPS[DROPS.length - 1];
+    for (const d of DROPS) {
+      const box = [left - 3, y + d, left + c.w + 3, y + d + c.h];
+      if (!placed.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) { drop = d; break; }
+    }
+    placed.push([left - 3, y + drop, left + c.w + 3, y + drop + c.h]);
+    c.line.setAttribute("x1", x); c.line.setAttribute("y1", y);
+    c.line.setAttribute("x2", x); c.line.setAttribute("y2", y + drop);
+    c.dot.setAttribute("cx", x); c.dot.setAttribute("cy", y);
+    c.label.style.left = left + "px"; c.label.style.top = (y + drop) + "px";
+  }
+}
+map.on("render", layoutCallouts);
+map.on("load", layoutCallouts);
+function layers() {
+  const base = BASES[state.base], colourFn = COLOURS[state.colour], f = state.frame;
+  return [
+    new deck.ColumnLayer({
+      id: "bars", data: idx, diskResolution: 12, radius: 170, extruded: true, pickable: true,
+      getPosition: i => [P.lon[i], P.lat[i]],
+      getElevation: i => (base.f(f, i) - base.floor) * state.exag,
+      getFillColor: i => colourFn(f, i),
+      updateTriggers: { getElevation: [f, state.base, state.exag], getFillColor: [f, state.colour] },
+      transitions: { getElevation: 120 },
+    }),
+  ];
+}
+const overlay = new deck.MapboxOverlay({
+  interleaved: false, layers: layers(),
+  getTooltip: ({ index, layer }) => layer && layer.id === "bars" && index >= 0 ? { text: tipText(state.frame, index) } : null,
+});
+map.addControl(overlay);
+
+function tipText(f, p) {
+  return `km ${P.chainage_km[p].toFixed(1)}  (lag ${P.lag_min[p].toFixed(0)} min, ratio ${P.ratio[p].toFixed(2)})\n`
+    + `${H[f][p].toFixed(2)} m above local LAT   ${(H[f][p] - P.msl_m[p]).toFixed(2)} m vs MSL\n`
+    + `rate ${rate[f][p] >= 0 ? "+" : ""}${rate[f][p].toFixed(2)} m/h   slope ${slope[f][p] >= 0 ? "+" : ""}${slope[f][p].toFixed(0)} mm/km`;
+}
+
+// ---- Profile (canvas) --------------------------------------------------------------
+const cv = $("profile"), ctx = cv.getContext("2d"), ptip = $("ptip");
+const PAD = { l: 64, r: 16, t: 14, b: 58 };
+const KM_MAX = P.chainage_km[NP - 1];
+function sizeCanvas() {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function drawProfile() {
+  const r = cv.getBoundingClientRect(), W = r.width, Ht = r.height;
+  const base = BASES[state.base], f = state.frame, colourFn = COLOURS[state.colour];
+  const yLo = Math.floor(base.floor * 2) / 2, yHi = Math.ceil(base.max * 2) / 2;
+  const X = km => PAD.l + (km / KM_MAX) * (W - PAD.l - PAD.r);
+  const Y = v => PAD.t + (1 - (v - yLo) / (yHi - yLo)) * (Ht - PAD.t - PAD.b);
+  ctx.clearRect(0, 0, W, Ht);
+  ctx.font = "11px system-ui, sans-serif";
+
+  // Lag-reversed reach
+  ctx.fillStyle = "rgba(230,160,40,.12)";
+  ctx.fillRect(X(LAG_REVERSED[0]), PAD.t, X(LAG_REVERSED[1]) - X(LAG_REVERSED[0]), Ht - PAD.t - PAD.b);
+  ctx.fillStyle = "#8a4b00"; ctx.textAlign = "center";
+  ctx.fillText("lag reversed", X((LAG_REVERSED[0] + LAG_REVERSED[1]) / 2), PAD.t + 10);
+
+  // Gridlines and y labels
+  ctx.strokeStyle = "#e3e7ea"; ctx.fillStyle = "#5d6873"; ctx.textAlign = "right"; ctx.lineWidth = 1;
+  for (let v = yLo; v <= yHi + 1e-9; v += 0.5) {
+    ctx.beginPath(); ctx.moveTo(PAD.l, Y(v)); ctx.lineTo(W - PAD.r, Y(v)); ctx.stroke();
+    ctx.fillText(v.toFixed(1), PAD.l - 6, Y(v) + 4);
+  }
+  ctx.strokeStyle = "#9aa4ad";                // zero line (LAT, MSL or minimum)
+  ctx.beginPath(); ctx.moveTo(PAD.l, Y(0)); ctx.lineTo(W - PAD.r, Y(0)); ctx.stroke();
+  ctx.save(); ctx.translate(14, (PAD.t + Ht - PAD.b) / 2); ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = "center"; ctx.fillText(base.label, 0, 0); ctx.restore();
+
+  // 24 h envelope at each point
+  ctx.fillStyle = "rgba(31,111,178,.08)"; ctx.beginPath();
+  for (let p = 0; p < NP; p++) { let hi = -Infinity; for (let fr = 0; fr < NF; fr++) hi = Math.max(hi, base.f(fr, p)); p ? ctx.lineTo(X(P.chainage_km[p]), Y(hi)) : ctx.moveTo(X(P.chainage_km[p]), Y(hi)); }
+  for (let p = NP - 1; p >= 0; p--) { let lo = Infinity; for (let fr = 0; fr < NF; fr++) lo = Math.min(lo, base.f(fr, p)); ctx.lineTo(X(P.chainage_km[p]), Y(lo)); }
+  ctx.closePath(); ctx.fill();
+
+  // Current frame: one bar per point from the zero line, same colours as the map
+  const bw = Math.max(1, (X(P.chainage_km[1]) - X(0)) * 0.8);
+  for (let p = 0; p < NP; p++) {
+    const v = base.f(f, p), x = X(P.chainage_km[p]);
+    ctx.fillStyle = css(colourFn(f, p));
+    ctx.fillRect(x - bw / 2, Math.min(Y(v), Y(0)), bw, Math.abs(Y(v) - Y(0)) || 1);
+  }
+  // Water-level line on top
+  ctx.strokeStyle = "#1d2329"; ctx.lineWidth = 1.5; ctx.beginPath();
+  for (let p = 0; p < NP; p++) { const x = X(P.chainage_km[p]), y = Y(base.f(f, p)); p ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.stroke();
+
+  // x axis: km ticks every 10 km above the station names
+  ctx.fillStyle = "#5d6873"; ctx.strokeStyle = "#9aa4ad"; ctx.lineWidth = 1; ctx.textAlign = "center";
+  for (let km = 0; km <= KM_MAX; km += 10) ctx.fillText(km, X(km), Ht - PAD.b + 12);
+  ctx.textAlign = "left"; ctx.fillText("km", X(KM_MAX) - 14, Ht - PAD.b + 12);
+  // Station names, angled so neighbours (Tennyson/Indooroopilly, Moggill/Kholo) don't collide
+  for (const s of DATA.stations) {
+    const x = X(s.chainage_km);
+    ctx.beginPath(); ctx.moveTo(x, Ht - PAD.b); ctx.lineTo(x, Ht - PAD.b + 3); ctx.stroke();
+    ctx.save(); ctx.translate(x, Ht - PAD.b + 18); ctx.rotate(-0.6); ctx.textAlign = "right";
+    ctx.fillText(s.short, 0, 8); ctx.restore();
+  }
+}
+cv.addEventListener("mousemove", e => {
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left;
+  const km = (x - PAD.l) / (r.width - PAD.l - PAD.r) * KM_MAX;
+  if (km < 0 || km > KM_MAX) { ptip.style.display = "none"; return; }
+  let p = 0, best = Infinity;
+  for (let i = 0; i < NP; i++) { const d = Math.abs(P.chainage_km[i] - km); if (d < best) { best = d; p = i; } }
+  ptip.textContent = tipText(state.frame, p).replace(/\n/g, "  ·  ");
+  ptip.style.display = "block";
+  ptip.style.left = Math.min(x + 12, r.width - ptip.offsetWidth - 4) + "px"; ptip.style.top = "6px";
+});
+cv.addEventListener("mouseleave", () => { ptip.style.display = "none"; });
+
+// ---- Wiring -------------------------------------------------------------------------
+function update() {
+  slider.value = state.frame;
+  $("clock").textContent = fmtTime(DATA.times[state.frame]) + " AEST";
+  overlay.setProps({ layers: layers() });
+  drawProfile();
+}
+slider.addEventListener("input", () => { state.frame = +slider.value; update(); });
+$("colour").addEventListener("change", e => { state.colour = e.target.value; renderLegend(); update(); });
+$("base").addEventListener("change", e => { state.base = e.target.value; update(); });
+$("exag").addEventListener("input", e => { state.exag = +e.target.value; update(); });
+
+let timer = null;
+function setPlaying(on) {
+  state.playing = on; $("play").textContent = on ? "❚❚ Pause" : "▶ Play";
+  clearInterval(timer);
+  if (on) timer = setInterval(() => { state.frame = (state.frame + 1) % NF; update(); }, 1000 / +$("speed").value);
+}
+$("play").addEventListener("click", () => setPlaying(!state.playing));
+$("speed").addEventListener("change", () => { if (state.playing) setPlaying(true); });
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT") return;
+  if (e.key === " ") { e.preventDefault(); setPlaying(!state.playing); }
+  if (e.key === "ArrowRight") { state.frame = Math.min(NF - 1, state.frame + 1); update(); }
+  if (e.key === "ArrowLeft") { state.frame = Math.max(0, state.frame - 1); update(); }
+});
+window.addEventListener("resize", () => { sizeCanvas(); drawProfile(); });
+
+sizeCanvas(); renderLegend(); update();
+</script>
+</body>
+</html>

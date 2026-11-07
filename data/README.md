@@ -71,21 +71,32 @@ This file is hand-built, not a copy of anything published, so record any change 
 - `ratio` is the height ratio relative to Brisbane Bar:
   - Pinkenba to Indooroopilly: the published ratio.
   - Stations marked `**` in the PDF (non-linear transfer, no ratio published): **derived** as the mean of the spring and neap range ratios against the Bar. The Bar values used were spring range 1.80 m and neap range 1.03 m. This is an estimate, and the spring and neap ratios diverge upriver (Moggill is about 1.14 vs 1.38).
+  - Reviewed 2026-11-07 (v0.3.0): the spring-only range ratio was considered and rejected. It is exact at springs but understates neap swings by up to ~22 % (Kholo); the mean is within about ±12 % in both regimes. A ratio that varies with the Bar's current range is a candidate v0.4 item.
+- `msl_m` is mean sea level from the same table, in metres above the station's **own** local LAT. Added in v0.3.0 for the absolute-height baseline.
+- `range_m` is the spring range, MHWS − MLWS, from the same table. Added in v0.3.0 as a reference column; the script does not use it for the ratio.
 - `chainage_km` is distance along the river from the Brisbane Bar gauge, measured on `centreline.csv`. Each station's `lat`/`lon` is snapped to the nearest point on the centreline, and the result is rounded to 0.1 km. Written by `python build_centreline.py --no-fetch --write-stations`. Because the positions are rounded to ~1 arc-minute, each value carries roughly ±1 km of uncertainty. Tennyson is the weakest snap: about 1.1 km off the line, with another reach about 0.8 km further away.
-- Header: `name,lat,lon,chainage_km,lag_min,lag_hw_min,lag_lw_min,ratio,note`.
+- Header: `name,lat,lon,chainage_km,lag_min,lag_hw_min,lag_lw_min,ratio,msl_m,range_m,note`.
 - `note` records the provenance of each ratio (published, or derived with the spring and neap values used).
 - 14 rows: the 13 stations plus a `Mt Crosby Weir` placeholder with empty values, which the script skips. Fill it in only from a source.
 - Line endings are CRLF. `build_centreline.py` keeps them when it rewrites the file.
-- SHA-256 (2026-11-07, after the changes below): `c8a89ca16b5238c538483e7591e8a9baf5bd07d740dbf30c92cae9906db3c6c3`.
+- SHA-256 (2026-11-07, after the changes below): `f03fceac0c02e605e7ea11cdb396aa23c27e0e7f35ddded0c2262012f0d6e1fd`.
 
 **Changes**
 
+- 2026-11-07 (v0.3.0): added `msl_m` and `range_m` from the MSQ 2026 tidal planes table. No existing values changed. Lags and published ratios were re-checked against the same table and all match.
 - 2026-11-07: `chainage_km` replaced with distance measured along the river centreline. The old values were straight-line distances between consecutive stations and understated river distance by up to about 34 % (Kholo Creek 56.6 → 75.8 km, Moggill Ferry 49.2 → 68.6 km). Boat Passage now snaps to 0.0 km (it was 3.7). This does not affect the model, because its lag is 0 and its ratio is 1, the same as the Bar.
 - 2026-11-07: Brisbane Bar `lat`/`lon` changed from -27.3667, 153.1667 to -27.4016, 153.1574, the current gauge at Whyte Island (see `centreline.csv`, Gauge position). The old value matches the historical "West Inner Bar" position listed by PSMSL and GLOSS.
 
 **Known quirks**
 
 - Lags are not strictly monotonic. Seventeen Mile Rocks (80 min) is earlier than Indooroopilly (92.5 min). This comes from the published table, not a transcription error.
+
+**Known limitations**
+
+- **No common vertical datum.** Each station's heights (including `msl_m`) are above its own local LAT, not a shared reference. MSL "falls" from 1.43 m at Tennyson to 1.10 m at Kholo, but because the datums differ this says nothing reliable about the real water-surface gradient. Absolute heights built from `msl_m` are fine to display per point, but must not be differenced between points; the surface-slope proxy uses the anomaly instead.
+- **Tidal asymmetry upstream.** HW and LW lags differ (by up to 25 min at Indooroopilly and 20 min at Kholo), and MLWS falls faster than MHWS upriver. The script uses one lag (`lag_min`, the mean) and one ratio per station, so it scales the Bar's curve shape rather than reproducing the steeper flood and longer ebb. Candidate v0.4 item: separate HW and LW lags.
+- **Heights below LAT upstream at big springs.** The `**` stations use the mean of the spring and neap ratios, which overstates the spring swing (Kholo: 1.25 used vs 1.10 at springs). Most of the excess falls below MSL, so on large spring tides the model can go below local LAT. Example: 2026-11-08, Kholo minimum −0.14 m against a published MLWS of 0.19 m. Accepted for v0.3.0 (direction proxies are barely affected) and labelled on the page. Fix candidate (v0.4): ratio interpolated between spring and neap values using the Bar's current range.
+- **Lag runs backwards between Indooroopilly and Seventeen Mile Rocks** (km 37.6 → 44.7, lag 92.5 → 80 min, from the published table). Interpolated along chainage, the tide appears to arrive earlier further upstream across this reach. Left as published and labelled on the page.
 
 ---
 

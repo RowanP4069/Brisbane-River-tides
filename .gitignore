@@ -4,8 +4,7 @@ __pycache__/
 *.pyc
 
 # Generated outputs (regenerable by running the script)
-river_tide*.html
-river_tide*.csv
+output/
 
 # IDE and tool state that is machine-specific
 .idea/

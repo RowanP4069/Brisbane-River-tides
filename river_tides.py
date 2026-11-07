@@ -1,234 +1,238 @@
 #!/usr/bin/env python3
-"""Brisbane River predicted tide explorer (approach A: levels + rising/falling).
+"""Brisbane River predicted tide explorer (v0.3.0).
 
-Pipeline: Brisbane Bar 10-min predictions -> shift/scale per station using
-secondary-port lag & ratio (stations.csv), interpolated linearly along the river
--> rate of level change (m/h) -> interactive Plotly HTML + CSV table.
+Pipeline:
+  Brisbane Bar 10-min predictions
+  -> points every 500 m along the river centreline (data/centreline.csv)
+  -> lag, ratio and MSL at each point, interpolated along chainage from the
+     secondary-port stations (data/stations.csv)
+  -> absolute height per point per frame over a 24 h window
+  -> output/river_tides.html: web/river_tides_template.html with the data inlined
+     (3D map of bars + linked profile; open it from disk in a normal browser).
 
-IMPORTANT: rate of rise/fall is a DIRECTION indicator (rising ~ flood, falling ~ ebb),
-NOT a velocity. Excludes freshwater flow, wind, surge, dam releases.
+Tide model (secondary-port method, one lag and one ratio per point):
+    height(x, t) = MSL(x) + ratio(x) * (Bar(t - lag(x)) - MSL_Bar)
+At the Bar (lag 0, ratio 1) this returns the Bar prediction exactly.
+
+IMPORTANT: heights are on each station's LOCAL LAT datum. They can be shown
+per point but must not be differenced between points (see data/README.md).
+Excludes freshwater flow, wind, surge and dam releases. Anything derived from
+the heights (rising/falling, rate, slope) is a direction proxy, not a current.
 
 Usage:
-  pip install pandas numpy plotly
-  python river_tides.py --demo           # synthetic data, tests the pipeline
-  python river_tides.py --csv data/bar_2026_10min.csv --start 2026-10-10 --days 7
+  python river_tides.py --csv data/bar_2026_10min.csv --start 2026-11-08
+  python river_tides.py --demo --start 2026-11-08      # synthetic Bar tide
+  python river_tides.py --csv ... --json output/check.json   # dump the data
 
-Sources:
-    - https://www.data.qld.gov.au/dataset/brisbane-bar-tide-gauge-predicted-interval-data/resource/11f33b0e-953f-46f4-84a9-1aa0a779a5e7
-    - https://www.bom.gov.au/oceanography/projects/ntc/qld_tide_tables.shtml
-    - https://www.msq.qld.gov.au/tides/open-data
-    - https://www.msq.qld.gov.au/tides/tidal-planes
+Sources: see data/README.md.
 """
-# The text in triple quotes above is the module "docstring". Python ignores it when
-# running, but help() and IDEs (hover in PyCharm) show it as documentation.
-
-# --- Imports -------------------------------------------------------------------
-# argparse : standard library, turns command-line flags (--csv, --days ...) into variables.
-# Path     : standard library, a tidy way to build file paths that works on any OS.
-# numpy    : fast maths on whole arrays at once (no Python loops needed).
-# pandas   : tables (DataFrame) and labelled columns (Series), great for CSVs and dates.
-# plotly   : interactive charts saved as an HTML page you open in a browser.
-# The "as np" / "as pd" / "as go" parts are just short nicknames - a universal convention.
 import argparse
+import json
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
+DATA = Path(__file__).parent / "data"
+
+
+# --- Inputs ----------------------------------------------------------------------
 
 def load_bar(path):
-    """Expects columns Date, Time, (Ind), Reading as in the data.qld.gov.au interval CSV.
-    Times are AEST (UTC+10, no DST), kept as naive local time."""
-    # Read the whole CSV into a DataFrame (think: a spreadsheet in memory).
-    df = pd.read_csv(path)
+    """Brisbane Bar predictions as a time-indexed Series (metres above LAT).
 
-    # Normalise the column names: strip stray spaces and lowercase them, so "Date ",
-    # "DATE" and "date" all become "date". (The real file also starts with an invisible
-    # byte-order mark on "_id", which is why it's safer not to rely on exact names.)
-    # This is a "list comprehension": [do_something(c) for c in things] builds a new list.
+    Expects the data.qld.gov.au interval CSV: columns _id, Date, Time, Ind, Reading.
+    Times are AEST (UTC+10, no daylight saving), kept as naive local time.
+    """
+    # utf-8-sig strips the byte-order mark the file starts with.
+    df = pd.read_csv(path, encoding="utf-8-sig")
     df.columns = [c.strip().lower() for c in df.columns]
-
-    # Glue the Date and Time text columns together ("01/01/2026" + " " + "00:10")
-    # and convert to real datetime values. dayfirst=True because Australian dates
-    # are DD/MM/YYYY - without it, 02/01 could be read as 1 February.
+    # dayfirst=True: Australian DD/MM/YYYY dates.
     t = pd.to_datetime(df["date"].astype(str).str.strip() + " " + df["time"].astype(str).str.strip(),
                        dayfirst=True)
-
-    # Build a Series: one column of numbers (the tide height in metres) whose
-    # "index" (row labels) is the datetimes. A time-indexed Series lets us later
-    # slice by date, e.g. bar["2026-10-05":"2026-10-12"].
-    # errors="coerce" turns any unreadable value into NaN ("not a number") instead of crashing.
     s = pd.Series(pd.to_numeric(df["reading"], errors="coerce").values, index=t)
-
-    # Drop the NaN rows and make sure times are in order (needed for interpolation later).
     return s.dropna().sort_index()
 
 
-def demo_bar(start, days):
-    """Crude synthetic tide (M2+S2+K1+O1). For pipeline testing only."""
-    # Make a list of timestamps every 10 minutes. 144 = 24 h * 6 per hour.
-    # We start 2 days early and add 4 extra days so there's spare data either side
-    # of the window you asked for (main() trims it back down to +/- 1 day).
-    idx = pd.date_range(pd.Timestamp(start) - pd.Timedelta(days=2),
-                        periods=(days + 4) * 144, freq="10min")
-
-    # Convert each timestamp to "hours since the first one" as plain numbers,
-    # because the cosine maths below needs numbers, not dates.
+def demo_bar(start, hours):
+    """Crude synthetic Bar tide (M2+S2+K1+O1) around MSL 1.32 m. Pipeline testing only."""
+    # 1 day of padding either side, so lagged points always have data.
+    idx = pd.date_range(pd.Timestamp(start) - pd.Timedelta(days=1),
+                        pd.Timestamp(start) + pd.Timedelta(hours=hours) + pd.Timedelta(days=1),
+                        freq="10min")
     h = (idx - idx[0]).total_seconds().values / 3600
-
-    # A real tide is roughly a sum of cosine waves ("tidal constituents"), each with its
-    # own period. Here: mean level 1.7 m, plus
-    #   M2 (moon, 12.42 h), S2 (sun, 12.00 h)   -> the twice-daily tides
-    #   K1 (23.93 h), O1 (25.82 h)              -> the once-daily wobble
-    # Because h is a numpy array, this one line computes every time step at once.
-    # The trailing backslash "\" just continues the expression on the next line.
-    y = 1.7 + 0.65*np.cos(2*np.pi*h/12.42) + 0.2*np.cos(2*np.pi*h/12.0 + 1) \
+    y = 1.32 + 0.65*np.cos(2*np.pi*h/12.42) + 0.2*np.cos(2*np.pi*h/12.0 + 1) \
         + 0.15*np.cos(2*np.pi*h/23.93) + 0.1*np.cos(2*np.pi*h/25.82)
     return pd.Series(y, index=idx)
 
 
-def shifted(vals, tsec, lag_min, ratio):
-    """Level anomaly at a point lagged by lag_min behind the Bar, scaled by ratio."""
-    # This is the core idea of the whole program (the "secondary port" method):
-    # the tide upriver looks like the tide at the Bar, but
-    #   - LATER  (it takes time for the wave to travel upstream) -> lag_min
-    #   - BIGGER (the river narrows and amplifies it)             -> ratio
-    #
-    # Step by step:
-    #   vals - vals.mean()      : turn heights into an "anomaly" = height above/below
-    #                             average. We scale the swing, not the absolute height.
-    #   tsec - lag_min * 60     : for each moment t at the station, look up what the
-    #                             Bar was doing lag seconds EARLIER.
-    #   np.interp(want, have_x, have_y) : linear interpolation - estimates values at
-    #                             times between the 10-minute samples (lags like 13.5 min
-    #                             don't land exactly on a sample).
-    #   left/right=np.nan       : if we'd need Bar data from before the file starts,
-    #                             return NaN rather than invent a value.
-    #   ratio * ...             : stretch the swing by the station's range ratio.
-    return ratio * np.interp(tsec - lag_min * 60, tsec, vals - vals.mean(),
-                             left=np.nan, right=np.nan)
+def load_stations(path):
+    """Stations with complete lag, ratio, MSL and chainage, ordered mouth -> upstream."""
+    st = pd.read_csv(path)
+    need = ["chainage_km", "lag_min", "ratio", "msl_m"]
+    skipped = st[st[need].isna().any(axis=1)].name.tolist()
+    if skipped:
+        print("Skipped (incomplete row):", ", ".join(skipped))
+    st = st.dropna(subset=need).sort_values("chainage_km").reset_index(drop=True)
+    # Boat Passage and the Bar share chainage 0 with identical values. np.interp needs
+    # x to increase, so keep one row per chainage (the first, i.e. the Bar).
+    return st.drop_duplicates(subset="chainage_km", keep="first").reset_index(drop=True)
+
+
+def sample_centreline(path, step_km, end_km):
+    """Points every step_km along the centreline from 0 to end_km (end included).
+
+    lon/lat are interpolated linearly between centreline vertices by chainage.
+    Vertices are close together (957 over 117 km), so this is accurate enough.
+    """
+    cl = pd.read_csv(path)
+    ch = np.arange(0.0, end_km, step_km)
+    if end_km - ch[-1] > 1e-9:
+        ch = np.append(ch, end_km)          # finish exactly at the last station
+    return pd.DataFrame({
+        "chainage_km": np.round(ch, 3),
+        "lon": np.interp(ch, cl.chainage_km, cl.lon),
+        "lat": np.interp(ch, cl.chainage_km, cl.lat),
+    })
+
+
+# --- Model -----------------------------------------------------------------------
+
+def add_corrections(pts, st):
+    """Interpolate lag, ratio and MSL from the stations onto each point.
+
+    ASSUMPTION: each varies linearly along the river between stations.
+    Points beyond the last station would take its values; sample_centreline stops there.
+    """
+    for col in ["lag_min", "ratio", "msl_m"]:
+        pts[col] = np.interp(pts.chainage_km, st.chainage_km, st[col])
+    return pts
+
+
+def heights(bar, frames, pts, bar_msl):
+    """Absolute height (m above local LAT) as a 2-D array [frame, point].
+
+    For each point, look up the Bar lag minutes earlier (linear interpolation between
+    10-minute samples), take its departure from the Bar's MSL, scale it by the
+    point's ratio, and add the point's own MSL.
+    """
+    t0 = bar.index[0]
+    bar_sec = (bar.index - t0).total_seconds().values
+    frame_sec = (frames - t0).total_seconds().values
+    anomaly_bar = bar.values - bar_msl
+
+    # want[f, p] = time (s) at which the Bar must be read for frame f at point p.
+    # The [:, None] / [None, :] pairs make numpy build the full grid in one step.
+    want = frame_sec[:, None] - pts.lag_min.values[None, :] * 60
+    a = np.interp(want.ravel(), bar_sec, anomaly_bar, left=np.nan, right=np.nan).reshape(want.shape)
+    if np.isnan(a).any():
+        raise SystemExit("Bar data does not cover the window plus the largest lag - "
+                         "check --start against the CSV.")
+    return pts.msl_m.values[None, :] + pts.ratio.values[None, :] * a
+
+
+# --- Output ----------------------------------------------------------------------
+
+def station_labels(st, centreline_path):
+    """Station labels placed ON the centreline at each station's chainage.
+
+    The table's lat/lon are rounded to ~1 arc-minute and can sit off the river, so the
+    label goes where the model actually puts the station.
+    """
+    cl = pd.read_csv(centreline_path)
+    # Short form for the profile's x axis: drop anything in brackets.
+    short = st.name.str.replace(r"\s*\(.*\)", "", regex=True)
+    return [{"name": n, "short": s, "chainage_km": round(float(c), 1),
+             "lon": round(float(np.interp(c, cl.chainage_km, cl.lon)), 6),
+             "lat": round(float(np.interp(c, cl.chainage_km, cl.lat)), 6)}
+            for n, s, c in zip(st.name, short, st.chainage_km)]
+
+
+def write_html(payload, template_path, out_path):
+    """Inline the payload into the page template and write a single self-contained file."""
+    html = Path(template_path).read_text(encoding="utf-8")
+    marker = "/*__DATA__*/null"
+    if html.count(marker) != 1:
+        raise SystemExit(f"Template must contain {marker} exactly once: {template_path}")
+    # "</" is escaped so a stray "</script>" inside the data can never close the script tag.
+    data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_path).write_text(html.replace(marker, data), encoding="utf-8")
+
+
+def build_payload(frames, pts, h, start, bar_msl, step_min, stations):
+    """Everything the page needs, as plain lists (JSON-ready). Heights rounded to mm."""
+    return {
+        "meta": {
+            "start": start.isoformat(),
+            "step_min": step_min,
+            "timezone": "AEST (UTC+10)",
+            "bar_msl_m": bar_msl,
+            "datum": "metres above each station's local LAT (Queensland Port Datum)",
+            "model": "MSL(x) + ratio(x) * (Bar(t - lag(x)) - MSL_Bar)",
+        },
+        "times": [t.strftime("%Y-%m-%dT%H:%M") for t in frames],
+        "stations": stations,
+        "points": {
+            "chainage_km": pts.chainage_km.round(3).tolist(),
+            "lon": pts.lon.round(6).tolist(),
+            "lat": pts.lat.round(6).tolist(),
+            "lag_min": pts.lag_min.round(1).tolist(),
+            "ratio": pts.ratio.round(4).tolist(),
+            "msl_m": pts.msl_m.round(3).tolist(),
+        },
+        # heights[frame][point]
+        "heights": np.round(h, 3).tolist(),
+    }
 
 
 def main():
-    # --- 1. Read the command-line options ---------------------------------------
-    # Each add_argument defines one flag. "--csv-out" becomes a.csv_out (dashes -> underscores).
-    # Running with --help prints all of these automatically.
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--csv")                                   # path to the Bar tide CSV
-    # Path(__file__).parent = the folder this script lives in, so the default works
-    # no matter which folder you run the script from.
-    ap.add_argument("--stations", default=str(Path(__file__).parent / "data" / "stations.csv"))
-    ap.add_argument("--start", default=str(pd.Timestamp.now().date()))  # default: today
-    ap.add_argument("--days", type=int, default=7)             # type=int converts "7" text -> 7
-    ap.add_argument("--out", default="river_tide.html")
-    ap.add_argument("--demo", action="store_true")             # a switch: present = True, absent = False
-    ap.add_argument("--csv-out", default="river_tide.csv",
-                    help="per-station level anomaly (m) and rate (m/h) table")
-    a = ap.parse_args()                                        # a.csv, a.days, a.demo, ...
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--csv", help="Brisbane Bar 10-min prediction CSV")
+    ap.add_argument("--demo", action="store_true", help="use a synthetic Bar tide")
+    ap.add_argument("--stations", default=str(DATA / "stations.csv"))
+    ap.add_argument("--centreline", default=str(DATA / "centreline.csv"))
+    ap.add_argument("--start", default=str(pd.Timestamp.now().date()),
+                    help="window start, local AEST (default: today 00:00)")
+    ap.add_argument("--hours", type=float, default=24)
+    ap.add_argument("--step-min", type=int, default=10, help="minutes between frames")
+    ap.add_argument("--spacing-km", type=float, default=0.5, help="distance between bars")
+    ap.add_argument("--out", default="output/river_tides.html")
+    ap.add_argument("--template", default=str(Path(__file__).parent / "web" / "river_tides_template.html"))
+    ap.add_argument("--json", help="also write the page data to this JSON file")
+    a = ap.parse_args()
     if not (a.csv or a.demo):
-        ap.error("give --csv PATH or --demo")                  # prints usage and exits
+        ap.error("give --csv PATH or --demo")
 
-    # --- 2. Load the Brisbane Bar tide and trim it to the time window -------------
-    # Timedelta is a length of time; adding it to a Timestamp gives a new Timestamp.
     start = pd.Timestamp(a.start)
-    end = start + pd.Timedelta(days=a.days)
+    frames = pd.date_range(start, start + pd.Timedelta(hours=a.hours), freq=f"{a.step_min}min")
 
-    # "X if condition else Y" is Python's one-line if/else.
-    bar = demo_bar(start, a.days) if a.demo else load_bar(a.csv)
+    st = load_stations(a.stations)
+    bar_msl = float(st.loc[st.chainage_km == 0, "msl_m"].iloc[0])
 
-    # pad 1 day each side so lagged points have data at the window edges
-    # (Kholo Creek lags ~160 min, so at 00:00 on day 1 it needs Bar data from the
-    # previous evening.) Slicing a time-indexed Series with [from:to] keeps that date range.
-    bar = bar[start - pd.Timedelta(days=1): end + pd.Timedelta(days=1)]
+    bar = demo_bar(start, a.hours) if a.demo else load_bar(a.csv)
+    # Keep 1 day either side: the largest lag (~3 h) needs Bar data before the start.
+    bar = bar[start - pd.Timedelta(days=1): frames[-1] + pd.Timedelta(days=1)]
     if bar.empty:
-        raise SystemExit("No data in the requested window - check --start against the CSV.")
+        raise SystemExit("No Bar data in the requested window - check --start against the CSV.")
 
-    # --- 3. Load the stations table (lag + ratio for each place along the river) ---
-    st = pd.read_csv(a.stations)
-    # Boolean filtering: st.lag_min.isna() is a True/False column; "|" means OR.
-    # st[mask] keeps only rows where the mask is True. Here: rows we can't use.
-    skipped = st[st.lag_min.isna() | st.ratio.isna()].name.tolist()
-    # Keep only complete rows, ordered from the river mouth upstream.
-    st = st.dropna(subset=["chainage_km", "lag_min", "ratio"]).sort_values("chainage_km")
-    if skipped:
-        print("Skipped (missing lag/ratio):", ", ".join(skipped))
+    pts = sample_centreline(a.centreline, a.spacing_km, st.chainage_km.max())
+    pts = add_corrections(pts, st)
+    h = heights(bar, frames, pts, bar_msl)
 
-    # --- 4. Compute the tide all along the river ---------------------------------
-    # Time as plain numbers: seconds since the first sample (0, 600, 1200, ...).
-    # np.interp and np.gradient work with numbers, not datetimes.
-    tsec = (bar.index - bar.index[0]).total_seconds().values
+    print(f"{len(frames)} frames x {len(pts)} points, "
+          f"{frames[0]:%Y-%m-%d %H:%M} to {frames[-1]:%Y-%m-%d %H:%M} AEST; "
+          f"heights {h.min():.2f} to {h.max():.2f} m")
 
-    # x = positions along the river every 1 km (0, 1, 2, ... 56, 56.6).
-    # 1 km grid, ending exactly at the last station (no extrapolation past it)
-    x = np.append(np.arange(st.chainage_km.min(), st.chainage_km.max(), 1.0), st.chainage_km.max())
-
-    # We only know lag/ratio AT the stations. For every km in between, estimate them by
-    # drawing straight lines between neighbouring stations (linear interpolation again,
-    # this time along distance instead of time).
-    lag = np.interp(x, st.chainage_km, st.lag_min)      # ASSUMPTION: linear along river
-    rat = np.interp(x, st.chainage_km, st.ratio)
-
-    # For each km: compute its lagged+scaled tide curve. zip(lag, rat) pairs them up:
-    # (lag at km 0, ratio at km 0), (lag at km 1, ratio at km 1), ...
-    # np.vstack stacks the curves into a 2-D grid: h[row = km, column = time].
-    h = np.vstack([shifted(bar.values, tsec, l, r) for l, r in zip(lag, rat)])
-
-    # Rate of change = slope of each curve: (change in level) / (change in time).
-    # Passing tsec/3600 (hours) as the spacing gives metres per hour.
-    # axis=1 means "differentiate along the time direction" (columns), not along the river.
-    rate = np.gradient(h, tsec / 3600, axis=1)          # m/h, + rising, - falling
-
-    # --- 5. Build the interactive chart ------------------------------------------
-    # win is a True/False array marking samples inside the requested window
-    # (dropping the 1-day padding). "&" means AND for arrays.
-    win = (bar.index >= start) & (bar.index <= end)
-
-    # Two stacked plots sharing one time axis: heatmap on top (60%), lines below (40%).
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.6, 0.4],
-                        vertical_spacing=0.06,
-                        subplot_titles=("Rate of level change along river (red = rising/flood-ish, "
-                                        "blue = falling/ebb-ish)", "Predicted level anomaly at stations"))
-
-    # Heatmap: x = time, y = km along river, colour = rate.
-    # rate[:, win] means "all rows (every km), only the columns inside the window".
-    # zmid=0 makes zero white; RdBu_r = red for positive (rising), blue for negative.
-    # The trailing "1, 1" puts this trace in row 1, column 1.
-    fig.add_trace(go.Heatmap(x=bar.index[win], y=x, z=rate[:, win], zmid=0, zmin=-0.8, zmax=0.8,
-                             colorscale="RdBu_r", colorbar=dict(title="m/h", len=0.55, y=0.8),
-                             hovertemplate="%{x}<br>km %{y}<br>%{z:.2f} m/h<extra></extra>"), 1, 1)
-
-    # --- 6. One line per station on the bottom plot, and collect the CSV columns ---
-    # table is a dict: {column name: column values}. pandas turns it into a table later.
-    table = {}
-    # itertuples() loops over table rows; r.name, r.lag_min etc. are that row's values.
-    for r in st.itertuples():
-        y = shifted(bar.values, tsec, r.lag_min, r.ratio)
-        fig.add_trace(go.Scatter(x=bar.index[win], y=y[win], name=r.name, mode="lines"), 2, 1)
-        # f"..." strings insert variables inside {}, e.g. "Pinkenba level (m)".
-        table[f"{r.name} level (m)"] = y[win]
-        # Same slope calculation as above, but for just this one station's curve.
-        table[f"{r.name} rate (m/h)"] = np.gradient(y, tsec / 3600)[win]
-
-    # Axis labels, a draggable range slider under the bottom plot, overall size/title.
-    # hovermode="x unified" shows every line's value at the hovered time in one tooltip.
-    fig.update_yaxes(title_text="Chainage from mouth (km)", row=1, col=1)
-    fig.update_yaxes(title_text="Level anomaly (m)", row=2, col=1)
-    fig.update_xaxes(title_text="Local time (AEST, UTC+10)", rangeslider_visible=True, row=2, col=1)
-    fig.update_layout(height=800, title="Brisbane River - predicted tide, mouth to tidal limit "
-                      "(direction indicator only, not velocity)", hovermode="x unified")
-
-    # --- 7. Save the outputs -----------------------------------------------------
-    # include_plotlyjs="cdn" keeps the HTML small by loading plotly from the internet.
-    fig.write_html(a.out, include_plotlyjs="cdn")
+    payload = build_payload(frames, pts, h, start, bar_msl, a.step_min,
+                            station_labels(st, a.centreline))
+    write_html(payload, a.template, a.out)
     print("Wrote", a.out)
-    # Turn the dict into a DataFrame with time as the first column, round to mm, save.
-    pd.DataFrame(table, index=pd.Index(bar.index[win], name="time_aest")) \
-        .round(3).to_csv(a.csv_out)
-    print("Wrote", a.csv_out)
+    if a.json:
+        Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.json).write_text(json.dumps(payload, separators=(",", ":")))
+        print("Wrote", a.json)
 
 
-# This block runs only when you run the file directly (python river_tides.py),
-# not when another script imports it. That lets other code reuse load_bar(), shifted() etc.
 if __name__ == "__main__":
     main()

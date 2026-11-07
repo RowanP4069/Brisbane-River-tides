@@ -1,8 +1,5 @@
 numpy==2.3.5
-packaging==26.3
 pandas==2.3.3
-plotly==5.20.0
 python-dateutil==4.0.0
 pytz==2026.6
-tenacity==9.2.1
 tzdata==2026.6
