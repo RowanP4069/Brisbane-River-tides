@@ -36,9 +36,13 @@ jobs:
           python-version: "3.14"
           cache: pip
       - run: pip install -r requirements.txt
-      # Today and tomorrow in Brisbane: the script takes "today" in Brisbane time,
-      # not the server's UTC clock. --stamp adds "Predictions built ... AEST".
-      - run: python river_tides.py --hours 48 --stamp --out site/index.html
+      # Stop before publishing if the page's model and river_tides.py disagree.
+      # Node.js comes with GitHub's Ubuntu runners.
+      - run: python check_parity.py
+      # The page carries the Bar data for every committed year and opens on the
+      # viewer's today, so a rebuild isn't needed to keep it current; the nightly run
+      # refreshes the "Predictions built ... AEST" stamp (--stamp) and shows breakage early.
+      - run: python river_tides.py --stamp --out site/index.html
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site

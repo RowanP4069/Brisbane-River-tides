@@ -6,9 +6,13 @@ Pipeline:
   -> points along the river centreline (data/centreline.csv), every 500 m by default
   -> lag, ratio and MSL at each point, interpolated along chainage from the
      secondary-port stations (data/stations.csv)
-  -> absolute height per point per frame over the window (24 h by default)
+  -> absolute height per point per frame over the window (48 h by default), for the
+     --json reference
   -> output/river_tides.html: web/river_tides_template.html with the data inlined
-     (3D map of bars + linked profile; open it from disk in a normal browser).
+     (3D map of bars + linked profile; open it from disk in a normal browser). The
+     page gets the whole Bar series and each point's lag, ratio and MSL, and works
+     out the heights itself for whichever day the viewer picks (check_parity.py
+     checks it matches the heights here).
 
 Tide model (secondary-port method, one lag and one ratio per point):
     height(x, t) = MSL(x) + ratio(x) * (Bar(t - lag(x)) - MSL_Bar)
@@ -24,7 +28,7 @@ Usage:
   python river_tides.py --start 2026-11-08            # uses every data/bar_YYYY_10min.csv
   python river_tides.py --csv OTHER.csv --start ...   # different Bar file(s)
   python river_tides.py --start ... --json output/check.json   # also dump the data
-  python river_tides.py --hours 48 --stamp            # as the hosted page is built
+  python river_tides.py --stamp                       # as the hosted page is built
 
 Sources: see data/README.md.
 """
@@ -216,18 +220,32 @@ def station_labels(st, centreline_path):
             for n, s, c, x, y in zip(st.name, short, st.chainage_km, lon, lat)]
 
 
-def build_payload(frames, pts, h, bar_msl, step_min, stations, built=None):
+def build_payload(frames, pts, h, bar_msl, step_min, stations, full_bar, hours,
+                  start_is_default, built=None):
     """Everything the page needs, as plain lists (JSON-ready). Becomes DATA in the page.
 
+    The page computes heights itself for whichever day the viewer picks, from "model":
+    the whole Bar series (full_bar, in mm) and each point's lag, ratio and MSL at full
+    precision, so it matches heights() here (check_parity.py tests that). Python stays
+    the source of truth for everything about places; the page only applies the formula.
+
+    "times" and "heights" are this run's window (--start, --hours) worked out by
+    heights(). They go into the --json file, as the reference check_parity.py compares
+    the page against, but not into the page (write_html leaves them out).
+
+    hours, start_is_default: the page opens on this window length, and on the --start
+    day if one was given, otherwise on the viewer's today (Brisbane).
     built: when the page was made, as a naive AEST Timestamp, or None to leave the
     stamp out (the default, so repeat runs give byte-identical output).
 
-    Rounding: chainage to 1 m, lon/lat to 6 decimals (~0.1 m), lag to 0.1 min,
-    ratio to 4 decimals and heights to 1 mm. That is finer than the model's accuracy
-    and keeps the page small (the heights grid is most of it).
+    Rounding in "points" (for display): chainage to 1 m, lon/lat to 6 decimals (~0.1 m),
+    lag to 0.1 min, ratio to 4 decimals; "heights" to 1 mm. Finer than the model's
+    accuracy. "model" is not rounded; the Bar series is whole mm, as published.
     """
     meta = {
         "start": frames[0].isoformat(),
+        "start_is_default": start_is_default,
+        "hours": hours,
         "step_min": step_min,
         "timezone": "AEST (UTC+10)",
         "bar_msl_m": bar_msl,
@@ -237,10 +255,26 @@ def build_payload(frames, pts, h, bar_msl, step_min, stations, built=None):
     }
     if built is not None:
         meta["built"] = built.strftime("%Y-%m-%dT%H:%M")    # same format as times
+    bar_mm = np.round(full_bar.values * 1000).astype(int)
+    # The CSVs give metres to 3 decimals, so whole mm lose nothing; check, in case a
+    # future file has more decimals.
+    if np.abs(bar_mm / 1000 - full_bar.values).max() > 1e-9:
+        raise SystemExit("Bar readings are not whole millimetres; the page's mm encoding "
+                         "would round them")
     return {
-        # The page reads meta.step_min and, if present, meta.built. The other fields
-        # describe the data for anyone reading the --json file on its own.
+        # The page reads meta.step_min, start, start_is_default, hours and (if present)
+        # built. The other fields describe the data for anyone reading the --json file.
         "meta": meta,
+        "model": {
+            "bar_start": full_bar.index[0].strftime("%Y-%m-%dT%H:%M"),
+            "bar_step_min": 10,                         # load_bars() guarantees it
+            "bar_mm": bar_mm.tolist(),
+            "bar_msl_m": bar_msl,
+            # Not rounded (unlike "points"), so the page reproduces heights() exactly.
+            "lag_min": pts.lag_min.tolist(),
+            "ratio": pts.ratio.tolist(),
+            "msl_m": pts.msl_m.tolist(),
+        },
         # Naive AEST, no seconds. fmtTime() in the template appends ":00" to parse
         # these, so change both together.
         "times": [t.strftime("%Y-%m-%dT%H:%M") for t in frames],
@@ -259,8 +293,12 @@ def build_payload(frames, pts, h, bar_msl, step_min, stations, built=None):
 
 
 def write_html(payload, template_path, out_path):
-    """Inline the payload into the page template and write a single self-contained file."""
+    """Inline the payload into the page template and write a single self-contained file.
+
+    "times" and "heights" are left out: the page computes its own windows from "model".
+    """
     html = Path(template_path).read_text(encoding="utf-8")
+    payload = {k: v for k, v in payload.items() if k not in ("times", "heights")}
     # The template has `const DATA = /*__DATA__*/null;`. The trailing null keeps the
     # unfilled template valid JavaScript, so opening it directly fails cleanly
     # (DATA is null) rather than with a syntax error.
@@ -288,11 +326,14 @@ def main():
                     help="secondary-port stations: chainage, lag, ratio, MSL (default: data/)")
     ap.add_argument("--centreline", default=str(DATA / "centreline.csv"),
                     help="river centreline from build_centreline.py (default: data/)")
-    ap.add_argument("--start", default=str(pd.Timestamp.now(tz=BRISBANE).date()),
-                    help="window start, local AEST, e.g. 2026-11-08 or 2026-11-08T06:00 "
-                         "(default: today 00:00 in Brisbane)")
-    ap.add_argument("--hours", type=float, default=24,
-                    help="window length in hours; the end frame is included (default: 24)")
+    ap.add_argument("--start",
+                    help="window start, local AEST, e.g. 2026-11-08 or 2026-11-08T06:00. "
+                         "The page opens on this day (and keeps the time of day when "
+                         "another day is picked). Default: today 00:00 in Brisbane, and "
+                         "the page opens on the viewer's today")
+    ap.add_argument("--hours", type=float, default=48,
+                    help="window length in hours; the end frame is included (default: 48). "
+                         "The page offers 24 and 48, plus this if different")
     ap.add_argument("--step-min", type=int, default=10,
                     help="minutes between frames (default: 10). If it does not divide the "
                          "window evenly, the window ends on the last whole step")
@@ -312,7 +353,8 @@ def main():
         ap.error("--step-min must be at least 1")
     if args.spacing_km <= 0:
         ap.error("--spacing-km must be more than 0")
-    start = pd.Timestamp(args.start)
+    start_is_default = args.start is None
+    start = pd.Timestamp(args.start or pd.Timestamp.now(tz=BRISBANE).date())
     frames = pd.date_range(start, start + pd.Timedelta(hours=args.hours),
                            freq=f"{args.step_min}min")
     # The page works out rates from neighbouring frames, so it needs at least two.
@@ -343,7 +385,8 @@ def main():
 
     built = pd.Timestamp.now(tz=BRISBANE).tz_localize(None) if args.stamp else None
     payload = build_payload(frames, pts, h, bar_msl, args.step_min,
-                            station_labels(st, args.centreline), built)
+                            station_labels(st, args.centreline), full, args.hours,
+                            start_is_default, built)
     write_html(payload, args.template, args.out)
     print("Wrote", args.out)
     if args.json:

@@ -28,6 +28,8 @@
   #time input { flex:1; min-width:0; }  /* min-width:0 lets the slider shrink on narrow screens */
   #clock { font-variant-numeric: tabular-nums; min-width: 15ch; font-weight:600; }
   #play { width: 5.5em; }
+  #day { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+  #day button, #day input, #day select { font:inherit; }
   #legend { display:flex; gap:10px; align-items:center; font-size:12px; color:var(--muted); }
   #legend .sw { display:inline-block; width:12px; height:12px; border-radius:2px; vertical-align:-2px; margin-right:4px; }
   #legend .ramp { width:120px; height:10px; border-radius:2px; }
@@ -50,6 +52,16 @@
 <div id="map"></div>
 
 <div id="controls">
+  <div id="day">
+    <button id="prevDay" type="button" aria-label="Previous day" title="Previous day">◀</button>
+    <!-- type="date": type a date, or pick one from the browser's calendar -->
+    <input id="date" type="date" aria-label="Day" title="Pick a day">
+    <button id="nextDay" type="button" aria-label="Next day" title="Next day">▶</button>
+    <button id="today" type="button" title="Today in Brisbane">Today</button>
+    <select id="hours" aria-label="Window length" title="Window length">
+      <option value="24">24 h</option><option value="48">48 h</option>
+    </select>
+  </div>
   <div id="time">
     <button id="play" type="button">▶ Play</button>
     <input id="slider" type="range" min="0" step="1" value="0" aria-label="Time">
@@ -98,44 +110,73 @@
 // ---- Data, inlined by river_tides.py --------------------------------------------
 const DATA = /*__DATA__*/null;
 
-const P = DATA.points, NP = P.chainage_km.length, NF = DATA.times.length;
-const H = DATA.heights;                       // H[frame][point], m above local LAT
-const dtHours = DATA.meta.step_min / 60;
-// Window length for labels, e.g. "24 h". river_tides.py --hours sets it; this is the
-// span from first to last frame, so --step-min values that don't divide it show e.g. 23.9.
-const WINDOW_LABEL = `${+((NF - 1) * dtHours).toFixed(1)} h`;
+const P = DATA.points, NP = P.chainage_km.length;
+const STEP_MIN = DATA.meta.step_min, dtHours = STEP_MIN / 60;
+
+// ---- Model: BEGIN (check_parity.py runs this block in Node, so keep it self-contained:
+// it may use only DATA and what it defines itself) ----------------------------------
+// height(x, t) = MSL(x) + ratio(x) * (Bar(t - lag(x)) - MSL_Bar), exactly as heights()
+// in river_tides.py. DATA.model holds the whole Bar series (whole mm) and each point's
+// lag, ratio and MSL at full precision; Python works those out, the page only applies
+// the formula.
+// Times are naive AEST. For arithmetic they are read as if UTC ("Z"): every day is then
+// exactly 24 h, and the viewer's own time zone never comes into it.
+const M = DATA.model;
+const MIN_MS = 60000, DAY_MS = 86400000;
+const isoMs = iso => Date.parse(iso.slice(0, 16) + ":00Z");     // "YYYY-MM-DDTHH:MM"
+const msIso = ms => new Date(ms).toISOString().slice(0, 16);
+const BAR_T0 = isoMs(M.bar_start), BAR_N = M.bar_mm.length, BAR_STEP_MS = M.bar_step_min * MIN_MS;
+const BAR_END = BAR_T0 + (BAR_N - 1) * BAR_STEP_MS;
+const MAX_LAG_MS = Math.max(...M.lag_min) * MIN_MS;
+
+// Bar minus MSL_Bar at time ms, linear between readings (as np.interp); NaN outside.
+function barAnomaly(ms) {
+  const x = (ms - BAR_T0) / BAR_STEP_MS, j = Math.floor(x);
+  if (!(x >= 0 && x <= BAR_N - 1)) return NaN;
+  const a = M.bar_mm[j] / 1000 - M.bar_msl_m;
+  if (j === BAR_N - 1) return a;
+  const b = M.bar_mm[j + 1] / 1000 - M.bar_msl_m;
+  return a + (b - a) * (x - j);
+}
+// Frames every stepMin from startMs for hours, end included (as pd.date_range).
+// Returns { times: ["YYYY-MM-DDTHH:MM", ...], heights: [frame][point] (m above local LAT) }.
+function computeWindow(startMs, hours, stepMin) {
+  const nf = Math.floor(hours * 60 / stepMin + 1e-9) + 1, times = [], heights = [];
+  for (let f = 0; f < nf; f++) {
+    const t = startMs + f * stepMin * MIN_MS, row = new Array(M.lag_min.length);
+    for (let p = 0; p < row.length; p++) {
+      // MINUS the lag: a point now shows what the Bar showed lag minutes ago.
+      row[p] = M.msl_m[p] + M.ratio[p] * barAnomaly(t - M.lag_min[p] * MIN_MS);
+    }
+    times.push(msIso(t));
+    heights.push(row);
+  }
+  return { times, heights };
+}
+// ---- Model: END --------------------------------------------------------------------
+
+// ---- Which days can be shown ---------------------------------------------------------
+// A window starts at a day's 00:00 plus TOD_MS: the time of day of river_tides.py --start
+// (00:00 unless a time was given), kept when another day is picked. A day is offered
+// only if the Bar data covers its whole window, including the upstream lag.
+const TOD_MS = isoMs(DATA.meta.start) % DAY_MS;
+const FIRST_DAY = Math.ceil((BAR_T0 + MAX_LAG_MS - TOD_MS) / DAY_MS) * DAY_MS;
+const lastDay = hours => Math.floor((BAR_END - hours * 3600000 - TOD_MS) / DAY_MS) * DAY_MS;
+const clampDay = (day, hours) => Math.min(lastDay(hours), Math.max(FIRST_DAY, day));
+const dayText = day => msIso(day).slice(0, 10);                    // "YYYY-MM-DD"
+const dayFromText = txt => /^\d{4}-\d{2}-\d{2}$/.test(txt) ? isoMs(txt + "T00:00") : NaN;
+// Today in Brisbane (UTC+10, no daylight saving), whatever the viewer's time zone.
+const brisbaneToday = () => Math.floor((Date.now() + 10 * 3600000) / DAY_MS) * DAY_MS;
+
+// ---- The window shown: set by setWindow() ------------------------------------------
+// H[frame][point]: m above local LAT. Everything below is recomputed for each window.
+let TIMES, H, NF, WINDOW_LABEL, localMin, rate, slope, RATE_MAX, SLOPE_MAX;
 
 // Reach where the published lag falls going upstream: Indooroopilly -> Seventeen Mile
 // Rocks, at the stations' chainages. The ONE copy of these numbers: the profile shading
 // and the footer text both use it. See data/README.md, Known limitations.
 const LAG_REVERSED = [37.6, 44.7];            // km
 document.getElementById("lagRevKm").textContent = `km ${LAG_REVERSED[0]} to ${LAG_REVERSED[1]}`;
-document.querySelector('#base option[value="min"]').textContent = `Above ${WINDOW_LABEL} minimum`;
-
-// ---- Derived series (computed once) ----------------------------------------------
-// localMin[p]: lowest height at p over the window (for the "above window minimum" baseline).
-const localMin = new Float64Array(NP).fill(Infinity);
-for (let f = 0; f < NF; f++) for (let p = 0; p < NP; p++) localMin[p] = Math.min(localMin[p], H[f][p]);
-
-// rate[f][p]: dh/dt in m/h. Central difference; one-sided at the window edges.
-// Needs NF >= 2 (otherwise b - a = 0 below); river_tides.py refuses shorter windows.
-const rate = H.map((row, f) => row.map((_, p) => {
-  const a = Math.max(0, f - 1), b = Math.min(NF - 1, f + 1);
-  return (H[b][p] - H[a][p]) / ((b - a) * dtHours);
-}));
-
-// slope[f][p]: flood-directed surface slope in mm/km, from the anomaly A = h - MSL.
-// Why the anomaly and not h: each place's heights are above its OWN LAT, so h at two
-// places is on different datums and can't be differenced. h - local MSL can be, as an
-// approximation (see data/README.md, "No common vertical datum").
-// x increases upstream, so a surface falling upstream (dA/dx < 0) pushes water upstream.
-// Positive = pushes upstream (flood-ish), negative = pushes downstream (ebb-ish).
-const slope = H.map(row => row.map((_, p) => {
-  const a = Math.max(0, p - 1), b = Math.min(NP - 1, p + 1);
-  const dA = (row[b] - P.msl_m[b]) - (row[a] - P.msl_m[a]);
-  const dx = P.chainage_km[b] - P.chainage_km[a];
-  return -1000 * dA / dx;
-}));
 
 // Colour scale limit for rate and slope: the 95th percentile of |value| over the whole
 // window, not the maximum, so a few extreme values don't wash every other bar out to
@@ -145,32 +186,69 @@ function pct95abs(arr2d) {
   const v = arr2d.flat().map(Math.abs).sort((x, y) => x - y);
   return v[Math.floor(0.95 * (v.length - 1))] || 1;
 }
-const RATE_MAX = pct95abs(rate), SLOPE_MAX = pct95abs(slope);
 
 // ---- Baselines --------------------------------------------------------------------
+// The "min" label is filled in by setWindow(), from the window length.
 const BASES = {
   lat: { label: "m above local LAT", f: (fr, p) => H[fr][p] },
   msl: { label: "m relative to local MSL", f: (fr, p) => H[fr][p] - P.msl_m[p] },
-  min: { label: `m above ${WINDOW_LABEL} minimum`, f: (fr, p) => H[fr][p] - localMin[p] },
+  min: { label: "", f: (fr, p) => H[fr][p] - localMin[p] },
 };
-// For each baseline, over ALL frames and points (so the scale stays fixed while playing):
-//   floor = the lowest value, or 0 if none is negative. Bars on the map grow up from
-//           here, so they never point down (e.g. "relative to MSL", or the below-LAT
-//           dips upstream at big springs).
-//   max   = the highest value; with floor it sets the profile's y axis.
-//   envLo[p], envHi[p] = lowest and highest value at point p: the profile's envelope band.
-for (const b of Object.values(BASES)) {
-  b.envLo = new Float64Array(NP).fill(Infinity);
-  b.envHi = new Float64Array(NP).fill(-Infinity);
-  for (let f = 0; f < NF; f++) {
-    for (let p = 0; p < NP; p++) {
-      const v = b.f(f, p);
-      b.envLo[p] = Math.min(b.envLo[p], v);
-      b.envHi[p] = Math.max(b.envHi[p], v);
+
+// Compute the window starting at startMs, and everything derived from it.
+function setWindow(startMs, hours) {
+  ({ times: TIMES, heights: H } = computeWindow(startMs, hours, STEP_MIN));
+  NF = TIMES.length;
+  // Window length for labels, e.g. "48 h": the span from first to last frame, so a
+  // --step-min that doesn't divide it shows e.g. 23.9.
+  WINDOW_LABEL = `${+((NF - 1) * dtHours).toFixed(1)} h`;
+  BASES.min.label = `m above ${WINDOW_LABEL} minimum`;
+  document.querySelector('#base option[value="min"]').textContent = `Above ${WINDOW_LABEL} minimum`;
+
+  // localMin[p]: lowest height at p over the window (for the "above window minimum" baseline).
+  localMin = new Float64Array(NP).fill(Infinity);
+  for (let f = 0; f < NF; f++) for (let p = 0; p < NP; p++) localMin[p] = Math.min(localMin[p], H[f][p]);
+
+  // rate[f][p]: dh/dt in m/h. Central difference; one-sided at the window edges.
+  // Needs NF >= 2 (otherwise b - a = 0 below); the window choices all give more.
+  rate = H.map((row, f) => row.map((_, p) => {
+    const a = Math.max(0, f - 1), b = Math.min(NF - 1, f + 1);
+    return (H[b][p] - H[a][p]) / ((b - a) * dtHours);
+  }));
+
+  // slope[f][p]: flood-directed surface slope in mm/km, from the anomaly A = h - MSL.
+  // Why the anomaly and not h: each place's heights are above its OWN LAT, so h at two
+  // places is on different datums and can't be differenced. h - local MSL can be, as an
+  // approximation (see data/README.md, "No common vertical datum").
+  // x increases upstream, so a surface falling upstream (dA/dx < 0) pushes water upstream.
+  // Positive = pushes upstream (flood-ish), negative = pushes downstream (ebb-ish).
+  slope = H.map(row => row.map((_, p) => {
+    const a = Math.max(0, p - 1), b = Math.min(NP - 1, p + 1);
+    const dA = (row[b] - P.msl_m[b]) - (row[a] - P.msl_m[a]);
+    const dx = P.chainage_km[b] - P.chainage_km[a];
+    return -1000 * dA / dx;
+  }));
+  RATE_MAX = pct95abs(rate); SLOPE_MAX = pct95abs(slope);
+
+  // For each baseline, over ALL frames and points (so the scale stays fixed while playing):
+  //   floor = the lowest value, or 0 if none is negative. Bars on the map grow up from
+  //           here, so they never point down (e.g. "relative to MSL", or the below-LAT
+  //           dips upstream at big springs).
+  //   max   = the highest value; with floor it sets the profile's y axis.
+  //   envLo[p], envHi[p] = lowest and highest value at point p: the profile's envelope band.
+  for (const b of Object.values(BASES)) {
+    b.envLo = new Float64Array(NP).fill(Infinity);
+    b.envHi = new Float64Array(NP).fill(-Infinity);
+    for (let f = 0; f < NF; f++) {
+      for (let p = 0; p < NP; p++) {
+        const v = b.f(f, p);
+        b.envLo[p] = Math.min(b.envLo[p], v);
+        b.envHi[p] = Math.max(b.envHi[p], v);
+      }
     }
+    b.floor = Math.min(0, ...b.envLo);
+    b.max = Math.max(...b.envHi);
   }
-  b.floor = Math.min(0, ...b.envLo);
-  b.max = Math.max(...b.envHi);
 }
 
 // ---- Colours ----------------------------------------------------------------------
@@ -212,9 +290,24 @@ function renderLegend() {
 const $ = id => document.getElementById(id);
 // exag: map bar height = height (m) x exag, so at the default 2000, 1 m of tide draws
 // as a 2 km column. Read from the slider so the HTML value="..." is the only default.
-const state = { frame: 0, colour: "dir", base: "lat", exag: +$("exag").value, playing: false };
+const state = { frame: 0, colour: "dir", base: "lat", exag: +$("exag").value, playing: false,
+                day: 0, hours: 48 };
 const slider = $("slider");
-slider.max = NF - 1;
+
+// Window length: the 24/48 h choices, plus river_tides.py --hours if it's another value.
+const hoursSel = $("hours");
+if (![...hoursSel.options].some(o => +o.value === DATA.meta.hours)) {
+  hoursSel.add(new Option(`${DATA.meta.hours} h`, DATA.meta.hours));
+}
+state.hours = DATA.meta.hours;
+hoursSel.value = String(DATA.meta.hours);
+// Opening day: from the address (#YYYY-MM-DD) if valid; else river_tides.py --start if
+// one was given; else today in Brisbane. Moved into range if needed.
+function dayFromHash() { return dayFromText(location.hash.slice(1)); }
+const hashDay = dayFromHash();
+state.day = clampDay(!isNaN(hashDay) ? hashDay
+  : DATA.meta.start_is_default ? brisbaneToday() : isoMs(DATA.meta.start) - TOD_MS, state.hours);
+setWindow(state.day + TOD_MS, state.hours);
 
 // Distance between bars, m (rounded: chainage_km * 1000 can carry float noise).
 const SPACING_M = Math.round((P.chainage_km[1] - P.chainage_km[0]) * 1000);
@@ -226,8 +319,10 @@ function fmtTime(iso) {
   const d = new Date(iso + ":00");
   return d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }) + " " + iso.slice(11, 16);
 }
-$("subtitle").textContent = `Predicted, ${fmtTime(DATA.times[0])} to ${fmtTime(DATA.times[NF - 1])} AEST, `
-  + `${NF} frames every ${DATA.meta.step_min} min, bars every ${SPACING_M} m`;
+function renderSubtitle() {
+  $("subtitle").textContent = `Predicted, ${fmtTime(TIMES[0])} to ${fmtTime(TIMES[NF - 1])} AEST, `
+    + `${NF} frames every ${STEP_MIN} min, bars every ${SPACING_M} m`;
+}
 // Build stamp: only in pages made with --stamp (the hosted page), so a reader can
 // tell if it has stopped updating.
 if (DATA.meta.built) {
@@ -490,7 +585,7 @@ cv.addEventListener("pointerleave", () => { ptip.style.display = "none"; });
 // Every control changes state, then calls update(), which redraws for state.frame.
 function update() {
   slider.value = state.frame;
-  $("clock").textContent = fmtTime(DATA.times[state.frame]) + " AEST";
+  $("clock").textContent = fmtTime(TIMES[state.frame]) + " AEST";
   if (overlay) overlay.setProps({ layers: layers() });
   drawProfile();
 }
@@ -498,6 +593,39 @@ slider.addEventListener("input", () => { state.frame = +slider.value; update(); 
 $("colour").addEventListener("change", e => { state.colour = e.target.value; renderLegend(); update(); });
 $("base").addEventListener("change", e => { state.base = e.target.value; update(); });
 $("exag").addEventListener("input", e => { state.exag = +e.target.value; update(); });
+
+// Day and window length. Changing day keeps the frame number, so the clock time stays
+// the same (every window starts at the same time of day). The day goes in the address
+// (#YYYY-MM-DD), so a link opens on the same day.
+const dateInput = $("date");
+dateInput.min = dayText(FIRST_DAY);
+function applyWindow(day, hours) {
+  state.hours = hours;
+  state.day = clampDay(day, hours);
+  setWindow(state.day + TOD_MS, hours);
+  state.frame = Math.min(state.frame, NF - 1);
+  slider.max = NF - 1;
+  dateInput.max = dayText(lastDay(hours));
+  dateInput.value = dayText(state.day);
+  $("prevDay").disabled = state.day <= FIRST_DAY;
+  $("nextDay").disabled = state.day >= lastDay(hours);
+  if (location.hash !== "#" + dayText(state.day)) history.replaceState(null, "", "#" + dayText(state.day));
+  renderSubtitle(); renderLegend(); update();
+}
+$("prevDay").addEventListener("click", () => applyWindow(state.day - DAY_MS, state.hours));
+$("nextDay").addEventListener("click", () => applyWindow(state.day + DAY_MS, state.hours));
+$("today").addEventListener("click", () => applyWindow(brisbaneToday(), state.hours));
+// "change" fires when a whole date has been typed or picked; an empty or half-typed box
+// gives "", which is ignored.
+dateInput.addEventListener("change", () => {
+  const d = dayFromText(dateInput.value);
+  if (!isNaN(d)) applyWindow(d, state.hours);
+});
+hoursSel.addEventListener("change", () => applyWindow(state.day, +hoursSel.value));
+window.addEventListener("hashchange", () => {
+  const d = dayFromHash();
+  if (!isNaN(d) && d !== state.day) applyWindow(d, state.hours);
+});
 
 // Playback: the Speed values (2, 5, 12) are frames per second. After the last frame it
 // loops back to the first. Changing speed while playing restarts the timer.
@@ -509,10 +637,11 @@ function setPlaying(on) {
 }
 $("play").addEventListener("click", () => setPlaying(!state.playing));
 $("speed").addEventListener("change", () => { if (state.playing) setPlaying(true); });
-// Keys: Space plays/pauses; Left/Right step one frame. Ignored in the drop-downs, which
-// use those keys themselves.
+// Keys: Space plays/pauses; Left/Right step one frame. Ignored in the drop-downs and
+// the date box, which use those keys themselves.
 document.addEventListener("keydown", e => {
-  if (e.target.tagName === "SELECT") return;
+  // The date box uses Space and the arrow keys itself.
+  if (e.target.tagName === "SELECT" || e.target === dateInput) return;
   // preventDefault: stop Space scrolling the page or also "clicking" a focused button.
   if (e.key === " ") { e.preventDefault(); setPlaying(!state.playing); }
   // A focused slider already moves itself on arrow keys (and fires "input"), so
@@ -523,7 +652,7 @@ document.addEventListener("keydown", e => {
 });
 window.addEventListener("resize", () => { sizeCanvas(); drawProfile(); });
 
-sizeCanvas(); renderLegend(); update();
+sizeCanvas(); applyWindow(state.day, state.hours);
 </script>
 </body>
 </html>

@@ -1,8 +1,8 @@
 # Brisbane River tides
 
-An interactive page that shows the **predicted tide** along the Brisbane River, from the Brisbane Bar to Kholo Creek, over a day. It's a personal hobby project, made by a kayaker who wanted to see when the tide turns along different reaches of the river.
+An interactive page that shows the **predicted tide** along the Brisbane River, from the Brisbane Bar to Kholo Creek, for any day in 2026 and 2027. It's a personal hobby project, made by a kayaker who wanted to see when the tide turns along different reaches of the river.
 
-**Open the page: <https://rowanp4069.github.io/Brisbane-River-tides/>** (today and tomorrow, rebuilt each night just after midnight Brisbane time).
+**Open the page: <https://rowanp4069.github.io/Brisbane-River-tides/>** It opens on today in Brisbane. Pick another day with the ◀ ▶ buttons or the calendar, and share a day with a link such as `…/Brisbane-River-tides/#2026-12-25`.
 
 > **Predicted astronomical tide only. Not for navigation.**
 > The model leaves out river flow, rain and dam releases, wind and storm surge. After rain the ebb can run for hours longer than shown, and the flood can disappear upriver altogether. The colours are proxies for flow direction worked out from predicted water level. They are not measured or modelled currents. Use Maritime Safety Queensland's official tide tables and local knowledge for planning.
@@ -13,7 +13,8 @@ An interactive page that shows the **predicted tide** along the Brisbane River, 
 
 - **3D map:** a bar every 500 m along the river. Bar height is the predicted water level, and the colour shows whether it's rising or falling (or the rate of change, or a surface-slope proxy).
 - **Profile:** the same data along the river as a chart, with the day's high-to-low range at each point.
-- **Time controls:** a 24-hour window at 10-minute steps, with play/pause, speed, and arrow keys to step through it.
+- **Day:** ◀ ▶ for the previous or next day, a date box with a calendar, **Today**, and a 24 h or 48 h window. Changing day keeps the same time of day, and the day goes in the address so a link opens on it.
+- **Time controls:** 10-minute steps through the window, with play/pause, speed, and arrow keys to step through it.
 
 ## How it works
 
@@ -31,15 +32,17 @@ Needs Python 3 (developed on 3.14). From the project folder:
     .venv/bin/pip install -r requirements.txt
     .venv/bin/python river_tides.py --start 2026-11-08
 
-You only need this to make a page for other dates or settings; the hosted page above is built the same way. This writes `output/river_tides.html`. Open it in a web browser. The page needs an internet connection for the map libraries and tiles, and the 3D map needs WebGL (without it, the profile and controls still work).
+You only need this to make a page for other dates or settings; the hosted page above is built the same way. This writes `output/river_tides.html`, which can show any day the Bar data covers. Open it in a web browser. The page needs an internet connection for the map libraries and tiles, and the 3D map needs WebGL (without it, the profile and controls still work).
 
 Useful options (`--help` lists them all):
 
-- `--start 2026-11-08T06:00`: start of the window, local AEST.
-- `--hours 12`: window length (default 24).
+- `--start 2026-11-08T06:00`: the day the page opens on, and the time of day each window starts (local AEST). Without it, the page opens on the viewer's today.
+- `--hours 12`: window length (default 48). The page offers 24 h and 48 h, plus this if different.
 - `--csv FILE ...`: different Brisbane Bar prediction file(s). By default it uses every `data/bar_YYYY_10min.csv`; 2026 and 2027 are committed. `fetch_bar.py --year YYYY` fetches another year.
 - `--json FILE`: also save the page data as JSON.
 - `--stamp`: show when the page was built (AEST). The hosted page uses it; it's off by default so repeat runs give identical files.
+
+The page computes each day's heights itself, with the same formula as `river_tides.py`. Python works out everything about places (the points, and each one's lag, ratio and MSL). `check_parity.py` checks that the page and Python agree to within the 1 mm rounding, over a set of test days; run it after changing the model on either side (it needs Node.js).
 
 `build_centreline.py` rebuilds `data/centreline.csv` from the saved watercourse data. You only need it if that data or the station positions change.
 
@@ -71,4 +74,4 @@ Built with help from Claude (Anthropic), using Claude Code.
 
 ## Licence
 
-The code (`river_tides.py`, `build_centreline.py`, `collect_gauges.py`, `fetch_bar.py` and `web/`) is under the MIT licence; see [LICENSE](LICENSE). The files in `data/` keep their original CC BY 4.0 licences, as listed above.
+The code (`river_tides.py`, `build_centreline.py`, `collect_gauges.py`, `fetch_bar.py`, `check_parity.py` and `web/`) is under the MIT licence; see [LICENSE](LICENSE). The files in `data/` keep their original CC BY 4.0 licences, as listed above.
