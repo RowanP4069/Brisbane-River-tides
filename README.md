@@ -5,6 +5,8 @@ An interactive page that shows the **predicted tide** along the Brisbane River, 
 > **Predicted astronomical tide only. Not for navigation.**
 > The model leaves out river flow, rain and dam releases, wind and storm surge. After rain the ebb can run for hours longer than shown, and the flood can disappear upriver altogether. The colours are proxies for flow direction worked out from predicted water level. They are not measured or modelled currents. Use Maritime Safety Queensland's official tide tables and local knowledge for planning.
 
+![The page at 02:50 on 8 November 2026, coloured by rate of change: the tide is falling (blue) from Indooroopilly to Kholo Creek, while near the mouth it is close to turning (pale, with a hint of red at the Bar).](docs/screenshot.png)
+
 ## What it shows
 
 - **3D map:** a bar every 500 m along the river. Bar height is the predicted water level, and the colour shows whether it's rising or falling (or the rate of change, or a surface-slope proxy).
