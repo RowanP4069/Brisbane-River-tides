@@ -74,7 +74,7 @@ This file is hand-built, not a copy of anything published, so record any change 
   - Reviewed 2026-11-07 (v0.3.0): the spring-only range ratio was considered and rejected. It is exact at springs but understates neap swings by up to ~22 % (Kholo); the mean is within about ±12 % in both regimes. A ratio that varies with the Bar's current range is a candidate v0.4 item.
 - `msl_m` is mean sea level from the same table, in metres above the station's **own** local LAT. Added in v0.3.0 for the absolute-height baseline.
 - `range_m` is the spring range, MHWS − MLWS, from the same table. Added in v0.3.0 as a reference column; the script does not use it for the ratio.
-- `chainage_km` is distance along the river from the Brisbane Bar gauge, measured on `centreline.csv`. Each station's `lat`/`lon` is snapped to the nearest point on the centreline, and the result is rounded to 0.1 km. Written by `python build_centreline.py --no-fetch --write-stations`. Because the positions are rounded to ~1 arc-minute, each value carries roughly ±1 km of uncertainty. Tennyson is the weakest snap: about 1.1 km off the line, with another reach about 0.8 km further away.
+- `chainage_km` is distance along the river from the Brisbane Bar gauge, measured on `centreline.csv`. Each station's `lat`/`lon` is snapped to the nearest point on the centreline, and the result is rounded to 0.1 km. Written by `python build_centreline.py --write-stations`. Because the positions are rounded to ~1 arc-minute, each value carries roughly ±1 km of uncertainty. Tennyson is the weakest snap: about 1.1 km off the line, with another reach about 0.8 km further away.
 - Header: `name,lat,lon,chainage_km,lag_min,lag_hw_min,lag_lw_min,ratio,msl_m,range_m,note`.
 - `note` records the provenance of each ratio (published, or derived with the spring and neap values used).
 - 14 rows: the 13 stations plus a `Mt Crosby Weir` placeholder with empty values, which the script skips. Fill it in only from a source.
@@ -142,7 +142,7 @@ None. Stored exactly as returned. All processing happens in `build_centreline.py
 - Header: `lon,lat,chainage_km`. 957 vertices, ordered from the gauge upstream. Chainage 0 at the gauge, 116.74 km at the upstream end.
 - Gauge position: Brisbane Bar (Whyte Island), 27° 24.096′ S, 153° 9.444′ E, from https://www.qld.gov.au/environment/coasts-waterways/beach/tide-sites/brisbane-bar (checked 2026-11-07). An older position, -27.36666, 153.16666 ("West Inner Bar"), is listed by PSMSL and GLOSS (https://psmsl.org/data/obtaining/stations/822.php). It is rounded to whole arc-minutes, out in the bay about 4 km away, and appears to be historical.
 - SHA-256 (built 2026-11-07): `f5e7a1c26efcf37a7443080df86fe8e11a6b2c119f1f70fa21bff2b300d1588f`. Size 29,911 bytes.
-- Rebuild with `python build_centreline.py --no-fetch`. The output should match the checksum above.
+- Rebuild with `python build_centreline.py` (it reuses the saved download; `--fetch` downloads it again and replaces it). The output should match the checksum above.
 
 **Known limitations**
 

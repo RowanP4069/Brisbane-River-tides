@@ -2,9 +2,10 @@
 """Build a Brisbane River centreline (Bar -> upstream) from QLD watercourse lines.
 
 Steps:
-  1. Download the "Brisbane River" segments of the QLD "Watercourse lines - Queensland"
-     layer and save the response unchanged (data/qld_watercourse_brisbane_river.geojson).
-     Skip this with --no-fetch to reuse the saved file.
+  1. Read the "Brisbane River" segments of the QLD "Watercourse lines - Queensland"
+     layer from the saved download (data/qld_watercourse_brisbane_river.geojson).
+     With --fetch, download them first and overwrite that file with the response,
+     unchanged. The saved file is the archived source, so this is opt-in.
   2. Join the segments into a network and take the shortest path from the river mouth
      to the most upstream point reached in the download box (this drops the duplicate
      channels around islands).
@@ -14,9 +15,9 @@ Steps:
      stations.csv is only changed with --write-stations; review the report first.
 
 Usage:
-  python build_centreline.py              # download, build, report
-  python build_centreline.py --no-fetch   # rebuild from the saved download
-  python build_centreline.py --no-fetch --write-stations   # also update chainage_km
+  python build_centreline.py                    # rebuild from the saved download, report
+  python build_centreline.py --fetch            # download again first (replaces the file)
+  python build_centreline.py --write-stations   # also update chainage_km in stations.csv
 
 Sources:
   - Watercourse lines - Queensland (Department of Resources), CC BY 4.0:
@@ -79,7 +80,8 @@ def fetch(path):
         "f": "geojson",
     }
     url = SERVICE + "?" + urllib.parse.urlencode(q)
-    req = urllib.request.Request(url, headers={"User-Agent": "Brisbane-river-tides/0.2"})
+    # No version in the User-Agent: it would only go stale.
+    req = urllib.request.Request(url, headers={"User-Agent": "Brisbane-river-tides build_centreline.py"})
     with urllib.request.urlopen(req, timeout=60) as r:
         body = r.read()
     j = json.loads(body)
@@ -103,13 +105,19 @@ def load_lines(path):
 
 
 def line_length(coords):
+    """Length in km of a polyline given as (lon, lat) pairs, on the local flat projection."""
     x, y = to_xy([c[0] for c in coords], [c[1] for c in coords])
     return float(np.hypot(np.diff(x), np.diff(y)).sum())
 
 
 def build_network(lines):
-    """Graph whose nodes are segment end points (rounded so touching ends match)
-    and whose edges are the segments, weighted by length in km."""
+    """Graph whose nodes are segment end points and whose edges are the segments,
+    weighted by length in km.
+
+    End points are rounded to 7 decimal places (~1 cm), so segments whose ends touch
+    share a node even if the source coordinates differ in the last digits.
+    adj[node] = list of (other_node, length_km, segment_index, reversed).
+    """
     key = lambda c: (round(c[0], 7), round(c[1], 7))
     adj = {}
     for i, ln in enumerate(lines):
@@ -120,6 +128,12 @@ def build_network(lines):
 
 
 def dijkstra(adj, src):
+    """Shortest distances along the network from src (Dijkstra's algorithm).
+
+    Returns dist[node] = km from src, for every node reachable from src, and
+    prev[node] = (previous_node, segment_index, reversed): the last step of the
+    shortest path to node, which main_stem() follows backwards to rebuild the line.
+    """
     dist, prev = {src: 0.0}, {}
     pq = [(0.0, src)]
     while pq:
@@ -145,20 +159,24 @@ def main_stem(lines):
     dist, prev = dijkstra(adj, mouth)
     top = max(dist, key=dist.get)
 
+    # Walk back from the upstream end to the mouth, prepending each segment.
     used, coords, n = [], [], top
     while n != mouth:
         p, i, rev = prev[n]
         # rev=True means the walk p -> n runs against the stored direction of segment i.
         seg = lines[i][::-1] if rev else lines[i]   # orient each segment mouth -> upstream
         used.append(i)
+        # A segment's last point is the first point of the one after it, so drop it
+        # to avoid a duplicate vertex at every join.
         coords = seg[:-1] + coords if coords else seg
         n = p
     unreached = len(nodes) - len(dist)
-    return coords, mouth, top, used, unreached, adj
+    return coords, top, used, unreached
 
 
-def report_branches(lines, used, adj):
-    """List segments not on the main stem that are connected to it (side channels)."""
+def report_branches(lines, used):
+    """Count the segments left off the main stem: side channels around islands, and
+    pieces not connected to it at all."""
     on = set(used)
     side = [i for i in range(len(lines)) if i not in on]
     total = sum(line_length(lines[i]) for i in side)
@@ -167,13 +185,18 @@ def report_branches(lines, used, adj):
 
 
 def chainage(coords):
+    """Cumulative distance in km along a polyline of (lon, lat) pairs, starting at 0."""
     x, y = to_xy([c[0] for c in coords], [c[1] for c in coords])
     return np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(x), np.diff(y)))])
 
 
 def snap(px, py, x, y, ch):
-    """Nearest point on the polyline (x, y, chainage ch) to (px, py).
-    Returns distance to every vertex segment so ambiguity can be checked."""
+    """Distance from (px, py) to each segment of the polyline (x, y, chainage ch).
+
+    Returns two arrays, one entry per segment: the distance (km) from the point to
+    the closest place on that segment, and that place's chainage. The caller takes
+    the nearest, and uses the rest to check whether another reach is nearly as close.
+    """
     ax, ay, bx, by = x[:-1], y[:-1], x[1:], y[1:]
     dx, dy = bx - ax, by - ay
     L2 = dx * dx + dy * dy
@@ -188,7 +211,8 @@ def station_report(coords, ch, stations_path, sep_km=2.0):
     """Snap stations and flag any whose position is nearly as close to a different
     reach of river (>= sep_km of chainage away). Those are likely on the wrong bend."""
     x, y = to_xy([c[0] for c in coords], [c[1] for c in coords])
-    rows = list(csv.DictReader(open(stations_path, encoding="utf-8")))
+    with open(stations_path, encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
     print(f"\nStation check (stations.csv positions are rounded to ~1 arc-minute, "
           f"so snap distances up to ~1.5 km are expected)")
     print(f"{'station':32s} {'old km':>7s} {'new km':>7s} {'snap m':>7s}  "
@@ -196,7 +220,7 @@ def station_report(coords, ch, stations_path, sep_km=2.0):
     out = []
     for r in rows:
         if not r["lat"]:
-            continue
+            continue        # no position (Mt Crosby Weir: not in the MSQ tables)
         px, py = to_xy(float(r["lon"]), float(r["lat"]))
         d, sch = snap(px, py, x, y, ch)
         i = int(np.argmin(d))
@@ -232,20 +256,24 @@ def write_stations(stations_path, new_ch):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--no-fetch", action="store_true", help="reuse the saved download")
-    ap.add_argument("--stations", default=str(DATA / "stations.csv"))
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--fetch", action="store_true",
+                    help="download the segments again first, replacing the saved file")
+    ap.add_argument("--stations", default=str(DATA / "stations.csv"),
+                    help="stations to snap and check (default: data/stations.csv)")
     ap.add_argument("--write-stations", action="store_true",
                     help="write the snapped chainage into stations.csv (review the report first)")
     a = ap.parse_args()
 
-    if not a.no_fetch:
+    if a.fetch:
         fetch(RAW)
+    elif not RAW.exists():
+        raise SystemExit(f"No saved download at {RAW}. Run with --fetch to download it.")
     print(f"Raw file SHA-256: {hashlib.sha256(RAW.read_bytes()).hexdigest()}")
 
     lines = load_lines(RAW)
-    coords, mouth, top, used, unreached, adj = main_stem(lines)
-    report_branches(lines, used, adj)
+    coords, top, used, unreached = main_stem(lines)
+    report_branches(lines, used)
     if unreached:
         print(f"Segment end points not connected to the main stem: {unreached}")
 
