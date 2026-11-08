@@ -101,11 +101,16 @@ def sample_centreline(path, step_km, end_km):
     ch = np.arange(0.0, end_km, step_km)
     if end_km - ch[-1] > 1e-9:
         ch = np.append(ch, end_km)          # finish exactly at the last station
-    return pd.DataFrame({
-        "chainage_km": np.round(ch, 3),
-        "lon": np.interp(ch, cl.chainage_km, cl.lon),
-        "lat": np.interp(ch, cl.chainage_km, cl.lat),
-    })
+    lon, lat = lonlat_at(cl, ch)
+    return pd.DataFrame({"chainage_km": np.round(ch, 3), "lon": lon, "lat": lat})
+
+
+def lonlat_at(cl, chainage_km):
+    """lon, lat of the centreline cl at the given chainage(s), by linear interpolation
+    between its vertices. Shared by the model points and the station labels so both
+    are placed the same way."""
+    return (np.interp(chainage_km, cl.chainage_km, cl.lon),
+            np.interp(chainage_km, cl.chainage_km, cl.lat))
 
 
 # --- Model -----------------------------------------------------------------------
@@ -177,39 +182,39 @@ def station_labels(st, centreline_path):
 
     The table's lat/lon are rounded to ~1 arc-minute and can sit off the river, so the
     label goes where the model actually puts the station.
+
+    st is the output of load_stations, so Mt Crosby Weir (no data) and Boat Passage
+    (merged into the Bar at km 0) get no label.
     """
     cl = pd.read_csv(centreline_path)
+    lon, lat = lonlat_at(cl, st.chainage_km)
     # Short form for the profile's x axis: drop anything in brackets.
     short = st.name.str.replace(r"\s*\(.*\)", "", regex=True)
     return [{"name": n, "short": s, "chainage_km": round(float(c), 1),
-             "lon": round(float(np.interp(c, cl.chainage_km, cl.lon)), 6),
-             "lat": round(float(np.interp(c, cl.chainage_km, cl.lat)), 6)}
-            for n, s, c in zip(st.name, short, st.chainage_km)]
+             "lon": round(float(x), 6), "lat": round(float(y), 6)}
+            for n, s, c, x, y in zip(st.name, short, st.chainage_km, lon, lat)]
 
 
-def write_html(payload, template_path, out_path):
-    """Inline the payload into the page template and write a single self-contained file."""
-    html = Path(template_path).read_text(encoding="utf-8")
-    marker = "/*__DATA__*/null"
-    if html.count(marker) != 1:
-        raise SystemExit(f"Template must contain {marker} exactly once: {template_path}")
-    # "</" is escaped so a stray "</script>" inside the data can never close the script tag.
-    data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(out_path).write_text(html.replace(marker, data), encoding="utf-8")
+def build_payload(frames, pts, h, bar_msl, step_min, stations):
+    """Everything the page needs, as plain lists (JSON-ready). Becomes DATA in the page.
 
-
-def build_payload(frames, pts, h, start, bar_msl, step_min, stations):
-    """Everything the page needs, as plain lists (JSON-ready). Heights rounded to mm."""
+    Rounding: chainage to 1 m, lon/lat to 6 decimals (~0.1 m), lag to 0.1 min,
+    ratio to 4 decimals and heights to 1 mm. That is finer than the model's accuracy
+    and keeps the page small (the heights grid is most of it).
+    """
     return {
+        # The page reads only meta.step_min. The other fields describe the data for
+        # anyone reading the --json file on its own.
         "meta": {
-            "start": start.isoformat(),
+            "start": frames[0].isoformat(),
             "step_min": step_min,
             "timezone": "AEST (UTC+10)",
             "bar_msl_m": bar_msl,
             "datum": "metres above each station's local LAT (Queensland Port Datum)",
             "model": "MSL(x) + ratio(x) * (Bar(t - lag(x)) - MSL_Bar)",
         },
+        # Naive AEST, no seconds. fmtTime() in the template appends ":00" to parse
+        # these, so change both together.
         "times": [t.strftime("%Y-%m-%dT%H:%M") for t in frames],
         "stations": stations,
         "points": {
@@ -223,6 +228,21 @@ def build_payload(frames, pts, h, start, bar_msl, step_min, stations):
         # heights[frame][point]
         "heights": np.round(h, 3).tolist(),
     }
+
+
+def write_html(payload, template_path, out_path):
+    """Inline the payload into the page template and write a single self-contained file."""
+    html = Path(template_path).read_text(encoding="utf-8")
+    # The template has `const DATA = /*__DATA__*/null;`. The trailing null keeps the
+    # unfilled template valid JavaScript, so opening it directly fails cleanly
+    # (DATA is null) rather than with a syntax error.
+    marker = "/*__DATA__*/null"
+    if html.count(marker) != 1:
+        raise SystemExit(f"Template must contain {marker} exactly once: {template_path}")
+    # "</" is escaped so a stray "</script>" inside the data can never close the script tag.
+    data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_path).write_text(html.replace(marker, data), encoding="utf-8")
 
 
 def main():
@@ -261,7 +281,7 @@ def main():
           f"{frames[0]:%Y-%m-%d %H:%M} to {frames[-1]:%Y-%m-%d %H:%M} AEST; "
           f"heights {h.min():.2f} to {h.max():.2f} m")
 
-    payload = build_payload(frames, pts, h, start, bar_msl, a.step_min,
+    payload = build_payload(frames, pts, h, bar_msl, a.step_min,
                             station_labels(st, a.centreline))
     write_html(payload, a.template, a.out)
     print("Wrote", a.out)
