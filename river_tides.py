@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Brisbane River predicted tide explorer (v0.3.0).
+"""Brisbane River predicted tide explorer.
 
 Pipeline:
   Brisbane Bar 10-min predictions
-  -> points every 500 m along the river centreline (data/centreline.csv)
+  -> points along the river centreline (data/centreline.csv), every 500 m by default
   -> lag, ratio and MSL at each point, interpolated along chainage from the
      secondary-port stations (data/stations.csv)
-  -> absolute height per point per frame over a 24 h window
+  -> absolute height per point per frame over the window (24 h by default)
   -> output/river_tides.html: web/river_tides_template.html with the data inlined
      (3D map of bars + linked profile; open it from disk in a normal browser).
 
 Tide model (secondary-port method, one lag and one ratio per point):
     height(x, t) = MSL(x) + ratio(x) * (Bar(t - lag(x)) - MSL_Bar)
-At the Bar (lag 0, ratio 1) this returns the Bar prediction exactly.
+MSL_Bar is the Brisbane Bar row's msl_m in stations.csv (1.32 m), not a mean of
+the Bar file. At the Bar (lag 0, ratio 1) this returns the Bar prediction exactly.
 
 IMPORTANT: heights are on each station's LOCAL LAT datum. They can be shown
 per point but must not be differenced between points (see data/README.md).
@@ -42,38 +43,61 @@ def load_bar(path):
     """Brisbane Bar predictions as a time-indexed Series (metres above LAT).
 
     Expects the data.qld.gov.au interval CSV: columns _id, Date, Time, Ind, Reading.
+    Only Date, Time and Reading are used (_id is a row number; Ind is 9 on every row
+    and its meaning is undocumented, see data/README.md).
     Times are AEST (UTC+10, no daylight saving), kept as naive local time.
+
+    Stops with an error if the readings are not a continuous 10-minute series:
+    later steps interpolate between samples and would silently bridge a gap.
     """
     # utf-8-sig strips the byte-order mark the file starts with.
     df = pd.read_csv(path, encoding="utf-8-sig")
     df.columns = [c.strip().lower() for c in df.columns]
-    # dayfirst=True: Australian DD/MM/YYYY dates.
-    t = pd.to_datetime(df["date"].astype(str).str.strip() + " " + df["time"].astype(str).str.strip(),
-                       dayfirst=True)
+    stamp = df["date"].astype(str).str.strip() + " " + df["time"].astype(str).str.strip()
+    t = pd.to_datetime(stamp, dayfirst=True)       # dayfirst: Australian DD/MM/YYYY
+    # errors="coerce" turns unreadable values into NaN; dropna removes them, and the
+    # gap check below then reports the hole they leave.
     s = pd.Series(pd.to_numeric(df["reading"], errors="coerce").values, index=t)
-    return s.dropna().sort_index()
+    s = s.dropna().sort_index()
+
+    steps = s.index.to_series().diff().dropna()
+    bad = steps[steps != pd.Timedelta(minutes=10)]
+    if not bad.empty:
+        raise SystemExit(f"{path}: {len(bad)} step(s) are not 10 min, first ending at "
+                         f"{bad.index[0]} ({bad.iloc[0]}). Missing or duplicate readings?")
+    return s
 
 
 def load_stations(path):
-    """Stations with complete lag, ratio, MSL and chainage, ordered mouth -> upstream."""
+    """Stations with complete lag, ratio, MSL and chainage, ordered mouth -> upstream.
+
+    The model reads only name, chainage_km, lag_min, ratio and msl_m. The other
+    columns (lat, lon, lag_hw_min, lag_lw_min, range_m, note) are reference only:
+    editing them does not change the output. lag_min is the mean of the HW and LW lags.
+    """
     st = pd.read_csv(path)
     need = ["chainage_km", "lag_min", "ratio", "msl_m"]
+    # Mt Crosby Weir is expected here: it is not in the MSQ tables, so its row is blank.
     skipped = st[st[need].isna().any(axis=1)].name.tolist()
     if skipped:
         print("Skipped (incomplete row):", ", ".join(skipped))
-    st = st.dropna(subset=need).sort_values("chainage_km").reset_index(drop=True)
+    # kind="stable" keeps rows with equal chainage in file order (default sort may not).
+    st = st.dropna(subset=need).sort_values("chainage_km", kind="stable").reset_index(drop=True)
     # Boat Passage and the Bar share chainage 0 with identical values. np.interp needs
-    # x to increase, so keep one row per chainage (the first, i.e. the Bar).
+    # x to increase, so keep one row per chainage: the first in the file, i.e. the Bar.
     return st.drop_duplicates(subset="chainage_km", keep="first").reset_index(drop=True)
 
 
 def sample_centreline(path, step_km, end_km):
     """Points every step_km along the centreline from 0 to end_km (end included).
 
-    lon/lat are interpolated linearly between centreline vertices by chainage.
-    Vertices are close together (957 over 117 km), so this is accurate enough.
+    lon/lat are interpolated linearly between centreline vertices by chainage, so each
+    point lies exactly on the centreline polyline. How closely that follows the real
+    river depends on the centreline itself (vertices typically ~100 m apart).
     """
     cl = pd.read_csv(path)
+    # np.arange stops BEFORE end_km, so add end_km as a final point unless the last
+    # step already landed on it. 1e-9 absorbs floating-point error in the steps.
     ch = np.arange(0.0, end_km, step_km)
     if end_km - ch[-1] > 1e-9:
         ch = np.append(ch, end_km)          # finish exactly at the last station
