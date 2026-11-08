@@ -1,0 +1,54 @@
+# Builds the page and publishes it to GitHub Pages:
+#   https://rowanp4069.github.io/Brisbane-River-tides/
+# The generated HTML is not committed; each run makes a fresh one.
+#
+# Needs, once: repo Settings -> Pages -> Source: GitHub Actions.
+# Note: GitHub turns off scheduled runs in a public repo after 60 days with no
+# commits. Re-enable it from the Actions tab if the page stops updating.
+name: Publish page
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 14:10 UTC = 00:10 AEST (Brisbane has no daylight saving). Scheduled runs can
+    # start late at busy times, which is fine for a tide page.
+    - cron: "10 14 * * *"
+  workflow_dispatch:      # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One publish at a time; let a running one finish rather than cancel it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: pip install -r requirements.txt
+      # Today and tomorrow in Brisbane: the script takes "today" in Brisbane time,
+      # not the server's UTC clock. --stamp adds "Predictions built ... AEST".
+      - run: python river_tides.py --hours 48 --stamp --out site/index.html
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

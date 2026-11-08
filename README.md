@@ -2,6 +2,8 @@
 
 An interactive page that shows the **predicted tide** along the Brisbane River, from the Brisbane Bar to Kholo Creek, over a day. It's a personal hobby project, made by a kayaker who wanted to see when the tide turns along different reaches of the river.
 
+**Open the page: <https://rowanp4069.github.io/Brisbane-River-tides/>** (today and tomorrow, rebuilt each night just after midnight Brisbane time).
+
 > **Predicted astronomical tide only. Not for navigation.**
 > The model leaves out river flow, rain and dam releases, wind and storm surge. After rain the ebb can run for hours longer than shown, and the flood can disappear upriver altogether. The colours are proxies for flow direction worked out from predicted water level. They are not measured or modelled currents. Use Maritime Safety Queensland's official tide tables and local knowledge for planning.
 
@@ -29,7 +31,7 @@ Needs Python 3 (developed on 3.14). From the project folder:
     .venv/bin/pip install -r requirements.txt
     .venv/bin/python river_tides.py --start 2026-11-08
 
-This writes `output/river_tides.html`. Open it in a web browser. The page needs an internet connection for the map libraries and tiles, and the 3D map needs WebGL (without it, the profile and controls still work).
+You only need this to make a page for other dates or settings; the hosted page above is built the same way. This writes `output/river_tides.html`. Open it in a web browser. The page needs an internet connection for the map libraries and tiles, and the 3D map needs WebGL (without it, the profile and controls still work).
 
 Useful options (`--help` lists them all):
 
@@ -37,6 +39,7 @@ Useful options (`--help` lists them all):
 - `--hours 12`: window length (default 24).
 - `--csv FILE`: a different Brisbane Bar prediction file. The committed file covers 2026 only.
 - `--json FILE`: also save the page data as JSON.
+- `--stamp`: show when the page was built (AEST). The hosted page uses it; it's off by default so repeat runs give identical files.
 
 `build_centreline.py` rebuilds `data/centreline.csv` from the saved watercourse data. You only need it if that data or the station positions change.
 

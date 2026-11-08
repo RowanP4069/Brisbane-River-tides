@@ -90,6 +90,7 @@
   <p>Data: Brisbane Bar predictions and 2026 tidal planes © State of Queensland (Maritime Safety Queensland), CC BY 4.0.
     River centreline: Watercourse lines - Queensland © State of Queensland (Department of Resources), CC BY 4.0.
     Basemap attribution on the map.</p>
+  <p id="built" hidden></p>
 </footer>
 
 <script>
@@ -227,6 +228,12 @@ function fmtTime(iso) {
 }
 $("subtitle").textContent = `Predicted, ${fmtTime(DATA.times[0])} to ${fmtTime(DATA.times[NF - 1])} AEST, `
   + `${NF} frames every ${DATA.meta.step_min} min, bars every ${SPACING_M} m`;
+// Build stamp: only in pages made with --stamp (the hosted page), so a reader can
+// tell if it has stopped updating.
+if (DATA.meta.built) {
+  $("built").textContent = `Predictions built ${fmtTime(DATA.meta.built)} AEST.`;
+  $("built").hidden = false;
+}
 
 // ---- Map + deck.gl ----------------------------------------------------------------
 // If the map can't start (no WebGL, or the libraries didn't load), say so in the map

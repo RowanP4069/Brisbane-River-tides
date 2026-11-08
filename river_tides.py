@@ -24,6 +24,7 @@ Usage:
   python river_tides.py --start 2026-11-08            # uses data/bar_2026_10min.csv
   python river_tides.py --csv OTHER.csv --start ...   # a different Bar file
   python river_tides.py --start ... --json output/check.json   # also dump the data
+  python river_tides.py --hours 48 --stamp            # as the hosted page is built
 
 Sources: see data/README.md.
 """
@@ -37,6 +38,10 @@ import pandas as pd
 # Default paths are relative to this script, so it works from any current folder.
 HERE = Path(__file__).parent
 DATA = HERE / "data"
+
+# All times are Brisbane local (AEST, UTC+10, no daylight saving). "Now" is taken in
+# this zone so a machine on another clock (e.g. a UTC build server) gets the same day.
+BRISBANE = "Australia/Brisbane"
 
 
 # --- Inputs ----------------------------------------------------------------------
@@ -197,25 +202,31 @@ def station_labels(st, centreline_path):
             for n, s, c, x, y in zip(st.name, short, st.chainage_km, lon, lat)]
 
 
-def build_payload(frames, pts, h, bar_msl, step_min, stations):
+def build_payload(frames, pts, h, bar_msl, step_min, stations, built=None):
     """Everything the page needs, as plain lists (JSON-ready). Becomes DATA in the page.
+
+    built: when the page was made, as a naive AEST Timestamp, or None to leave the
+    stamp out (the default, so repeat runs give byte-identical output).
 
     Rounding: chainage to 1 m, lon/lat to 6 decimals (~0.1 m), lag to 0.1 min,
     ratio to 4 decimals and heights to 1 mm. That is finer than the model's accuracy
     and keeps the page small (the heights grid is most of it).
     """
+    meta = {
+        "start": frames[0].isoformat(),
+        "step_min": step_min,
+        "timezone": "AEST (UTC+10)",
+        "bar_msl_m": bar_msl,
+        "datum": "metres above each station's local LAT "
+                 "(Queensland Port Datum, assumed; see data/README.md)",
+        "model": "MSL(x) + ratio(x) * (Bar(t - lag(x)) - MSL_Bar)",
+    }
+    if built is not None:
+        meta["built"] = built.strftime("%Y-%m-%dT%H:%M")    # same format as times
     return {
-        # The page reads only meta.step_min. The other fields describe the data for
-        # anyone reading the --json file on its own.
-        "meta": {
-            "start": frames[0].isoformat(),
-            "step_min": step_min,
-            "timezone": "AEST (UTC+10)",
-            "bar_msl_m": bar_msl,
-            "datum": "metres above each station's local LAT "
-                     "(Queensland Port Datum, assumed; see data/README.md)",
-            "model": "MSL(x) + ratio(x) * (Bar(t - lag(x)) - MSL_Bar)",
-        },
+        # The page reads meta.step_min and, if present, meta.built. The other fields
+        # describe the data for anyone reading the --json file on its own.
+        "meta": meta,
         # Naive AEST, no seconds. fmtTime() in the template appends ":00" to parse
         # these, so change both together.
         "times": [t.strftime("%Y-%m-%dT%H:%M") for t in frames],
@@ -261,9 +272,9 @@ def main():
                     help="secondary-port stations: chainage, lag, ratio, MSL (default: data/)")
     ap.add_argument("--centreline", default=str(DATA / "centreline.csv"),
                     help="river centreline from build_centreline.py (default: data/)")
-    ap.add_argument("--start", default=str(pd.Timestamp.now().date()),
+    ap.add_argument("--start", default=str(pd.Timestamp.now(tz=BRISBANE).date()),
                     help="window start, local AEST, e.g. 2026-11-08 or 2026-11-08T06:00 "
-                         "(default: today 00:00)")
+                         "(default: today 00:00 in Brisbane)")
     ap.add_argument("--hours", type=float, default=24,
                     help="window length in hours; the end frame is included (default: 24)")
     ap.add_argument("--step-min", type=int, default=10,
@@ -276,6 +287,9 @@ def main():
     ap.add_argument("--template", default=str(HERE / "web" / "river_tides_template.html"),
                     help="page template with the /*__DATA__*/null marker (default: web/)")
     ap.add_argument("--json", help="also write the page data to this JSON file")
+    ap.add_argument("--stamp", action="store_true",
+                    help="show on the page when it was built (AEST). Off by default so "
+                         "repeat runs give identical files; the hosted page uses it")
     args = ap.parse_args()
 
     if args.step_min < 1:
@@ -311,8 +325,9 @@ def main():
           f"{frames[0]:%Y-%m-%d %H:%M} to {frames[-1]:%Y-%m-%d %H:%M} AEST; "
           f"heights {h.min():.2f} to {h.max():.2f} m")
 
+    built = pd.Timestamp.now(tz=BRISBANE).tz_localize(None) if args.stamp else None
     payload = build_payload(frames, pts, h, bar_msl, args.step_min,
-                            station_labels(st, args.centreline))
+                            station_labels(st, args.centreline), built)
     write_html(payload, args.template, args.out)
     print("Wrote", args.out)
     if args.json:
