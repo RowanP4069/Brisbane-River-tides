@@ -119,7 +119,7 @@ Last 72 hours (5–8 Nov 2026): council gauge E1855 (AHD) compared with MSQ's of
 
 ## Recommendations
 
-1. **Start collecting council river-gauge readings now.** History only exists for 72 hours, so every day not saved is lost. A small scheduled GitHub Action could save the eight river gauges daily. That's about 7,000 rows a day at most; it could live in the repo or on a separate data branch. This is the most time-sensitive finding.
+1. **(Done 8 Nov 2026: `collect_gauges.py`, daily, to the `gauge-data` branch. It also saves the MSQ Bar feed.)** **Start collecting council river-gauge readings now.** History only exists for 72 hours, so every day not saved is lost. A small scheduled GitHub Action could save the eight river gauges daily. That's about 7,000 rows a day at most; it could live in the repo or on a separate data branch. This is the most time-sensitive finding.
 2. **Do item 13 soon.** The 2027 data is out. Sort out the 72,620-row question and the 1.32 vs 1.351 m Bar MSL while doing it.
 3. **Item 12:** fetch the Bar predictions through the datastore API, and keep a copy in `data/` so builds don't depend on the API being up. Decide when doing item 13.
 4. **Offline comparison (item 8):** start at Port Office. Compare three things there: our model, MSQ's official prediction and the measured level. Then work upriver with the council gauges. Use the MSQ Bar and Pinkenba archives for longer history near the mouth.

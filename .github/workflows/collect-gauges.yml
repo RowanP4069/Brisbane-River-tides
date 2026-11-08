@@ -1,0 +1,53 @@
+# Saves measured water levels before the sources drop them (council gauges keep
+# 72 hours, the MSQ Bar feed about a week). Runs collect_gauges.py from main and
+# commits any new readings to the gauge-data branch. main is never changed.
+#
+# Note: GitHub turns off scheduled runs in a public repo after 60 days with no
+# activity. Re-enable it from the Actions tab if the data stops growing.
+name: Collect gauges
+
+on:
+  schedule:
+    # 17:00 UTC = 03:00 AEST. Daily is plenty: the 72-hour window means two
+    # missed runs in a row still lose nothing.
+    - cron: "0 17 * * *"
+  workflow_dispatch:      # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write         # to push to the gauge-data branch
+
+concurrency:
+  group: collect-gauges
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code (main)
+        uses: actions/checkout@v5
+        with:
+          path: code
+      - name: Check out the data (gauge-data)
+        uses: actions/checkout@v5
+        with:
+          ref: gauge-data
+          path: data
+      # Standard library only, so the runner's own Python is enough.
+      - name: Collect
+        run: python3 code/collect_gauges.py --out data
+      # Runs even if one source failed, so the other source's readings are kept.
+      # The job still shows as failed (and GitHub emails) when the script did.
+      - name: Commit new readings
+        if: always()
+        working-directory: data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No new readings."
+          else
+            git commit -q -m "Collect gauges $(TZ=Australia/Brisbane date '+%Y-%m-%d %H:%M') AEST"
+            git push -q origin gauge-data
+          fi
