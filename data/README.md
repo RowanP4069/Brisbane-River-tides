@@ -90,6 +90,10 @@ This file is hand-built, not a copy of anything published, so record any change 
 **Known quirks**
 
 - Lags are not strictly monotonic. Seventeen Mile Rocks (80 min) is earlier than Indooroopilly (92.5 min). This comes from the published table, not a transcription error.
+  - It is almost all low water: HW is +1 20 at both places, while LW goes from +1 45 (Indooroopilly) to +1 20 (Seventeen Mile Rocks).
+  - Checked 2026-11-08: every Brisbane River row is identical in the 2025 and 2026 *Semidiurnal Tidal Planes* (the only change is the Port Office benchmark), so this is a long-standing value, not a new typo.
+  - Seventeen Mile Rocks and every place above it are marked `**`, which the PDF defines as "Tidal planes determined through non-linear tidal transfer. Contact MSQ Tidal Unit for further information."
+  - Query emailed to the MSQ Tidal Unit on 2026-11-08 (how the two places were derived, and how to use `**` time differences). Record the reply here.
 
 **Known limitations**
 

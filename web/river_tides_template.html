@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Brisbane River Tides</title>
-<!-- Pinned library versions. Both need internet; map tiles do too. -->
+<!-- Pinned library versions. Both need internet; map tiles do too.
+     Don't upgrade casually: MapLibre 6 is published only as an ES module, which these
+     plain <script> tags can't load. deck.gl 9.4.1 is the version tested with MapLibre 5.24. -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/deck.gl@9.4.1/dist.min.js"></script>
@@ -67,7 +69,7 @@
     <select id="base">
       <option value="lat" selected>Above local LAT</option>
       <option value="msl">Minus local MSL</option>
-      <option value="min">Above 24 h minimum</option>
+      <option value="min">Above window minimum</option><!-- text set from the window length below -->
     </select>
   </label>
   <label>Bar scale
@@ -82,7 +84,7 @@
   <p><b>Predicted astronomical tide only.</b> Excludes river flow, wind, storm surge and dam releases. Colours are
     <b>proxies</b> for flow direction derived from predicted water level. They are not measured or modelled currents. Not for navigation.</p>
   <p class="warn">Model limits: upstream of Seventeen Mile Rocks, ratios are estimated, so on big spring tides heights
-    can dip below local LAT. Between Indooroopilly and Seventeen Mile Rocks (km 37.6 to 44.7) the published lags run
+    can dip below local LAT. Between Indooroopilly and Seventeen Mile Rocks (<span id="lagRevKm">see data/README.md</span>) the published lags run
     backwards, so the tide appears to arrive earlier upstream. Heights are on each place's own LAT datum and are not
     comparable as a water surface; the slope proxy uses the departure from local MSL instead.</p>
   <p>Data: Brisbane Bar predictions and 2026 tidal planes © State of Queensland (Maritime Safety Queensland), CC BY 4.0.
@@ -98,20 +100,33 @@ const DATA = /*__DATA__*/null;
 const P = DATA.points, NP = P.chainage_km.length, NF = DATA.times.length;
 const H = DATA.heights;                       // H[frame][point], m above local LAT
 const dtHours = DATA.meta.step_min / 60;
-const LAG_REVERSED = [37.6, 44.7];            // km, see data/README.md
+// Window length for labels, e.g. "24 h". river_tides.py --hours sets it; this is the
+// span from first to last frame, so --step-min values that don't divide it show e.g. 23.9.
+const WINDOW_LABEL = `${+((NF - 1) * dtHours).toFixed(1)} h`;
+
+// Reach where the published lag falls going upstream: Indooroopilly -> Seventeen Mile
+// Rocks, at the stations' chainages. The ONE copy of these numbers: the profile shading
+// and the footer text both use it. See data/README.md, Known limitations.
+const LAG_REVERSED = [37.6, 44.7];            // km
+document.getElementById("lagRevKm").textContent = `km ${LAG_REVERSED[0]} to ${LAG_REVERSED[1]}`;
+document.querySelector('#base option[value="min"]').textContent = `Above ${WINDOW_LABEL} minimum`;
 
 // ---- Derived series (computed once) ----------------------------------------------
-// localMin[p]: lowest height at p over the window (for the "above 24 h minimum" baseline).
+// localMin[p]: lowest height at p over the window (for the "above window minimum" baseline).
 const localMin = new Float64Array(NP).fill(Infinity);
 for (let f = 0; f < NF; f++) for (let p = 0; p < NP; p++) localMin[p] = Math.min(localMin[p], H[f][p]);
 
 // rate[f][p]: dh/dt in m/h. Central difference; one-sided at the window edges.
+// Needs NF >= 2 (otherwise b - a = 0 below); river_tides.py refuses shorter windows.
 const rate = H.map((row, f) => row.map((_, p) => {
   const a = Math.max(0, f - 1), b = Math.min(NF - 1, f + 1);
   return (H[b][p] - H[a][p]) / ((b - a) * dtHours);
 }));
 
 // slope[f][p]: flood-directed surface slope in mm/km, from the anomaly A = h - MSL.
+// Why the anomaly and not h: each place's heights are above its OWN LAT, so h at two
+// places is on different datums and can't be differenced. h - local MSL can be, as an
+// approximation (see data/README.md, "No common vertical datum").
 // x increases upstream, so a surface falling upstream (dA/dx < 0) pushes water upstream.
 // Positive = pushes upstream (flood-ish), negative = pushes downstream (ebb-ish).
 const slope = H.map(row => row.map((_, p) => {
@@ -121,6 +136,10 @@ const slope = H.map(row => row.map((_, p) => {
   return -1000 * dA / dx;
 }));
 
+// Colour scale limit for rate and slope: the 95th percentile of |value| over the whole
+// window, not the maximum, so a few extreme values don't wash every other bar out to
+// grey. Values beyond it are drawn at full colour. "|| 1" avoids a zero limit (and a
+// divide by zero in diverge) if every value is 0.
 function pct95abs(arr2d) {
   const v = arr2d.flat().map(Math.abs).sort((x, y) => x - y);
   return v[Math.floor(0.95 * (v.length - 1))] || 1;
@@ -131,9 +150,13 @@ const RATE_MAX = pct95abs(rate), SLOPE_MAX = pct95abs(slope);
 const BASES = {
   lat: { label: "m above local LAT", f: (fr, p) => H[fr][p] },
   msl: { label: "m relative to local MSL", f: (fr, p) => H[fr][p] - P.msl_m[p] },
-  min: { label: "m above 24 h minimum", f: (fr, p) => H[fr][p] - localMin[p] },
+  min: { label: `m above ${WINDOW_LABEL} minimum`, f: (fr, p) => H[fr][p] - localMin[p] },
 };
-// Each baseline's floor: columns grow up from here so they never go negative.
+// For each baseline, over ALL frames and points (so the scale stays fixed while playing):
+//   floor = the lowest value, or 0 if none is negative. Bars on the map grow up from
+//           here, so they never point down (e.g. "relative to MSL", or the below-LAT
+//           dips upstream at big springs).
+//   max   = the highest value; with floor it sets the profile's y axis.
 for (const b of Object.values(BASES)) {
   let lo = 0, hi = -Infinity;
   for (let f = 0; f < NF; f++) for (let p = 0; p < NP; p++) { const v = b.f(f, p); lo = Math.min(lo, v); hi = Math.max(hi, v); }
@@ -317,7 +340,7 @@ function drawProfile() {
   ctx.save(); ctx.translate(14, (PAD.t + Ht - PAD.b) / 2); ctx.rotate(-Math.PI / 2);
   ctx.textAlign = "center"; ctx.fillText(base.label, 0, 0); ctx.restore();
 
-  // 24 h envelope at each point
+  // Envelope over the window (highest and lowest value) at each point
   ctx.fillStyle = "rgba(31,111,178,.08)"; ctx.beginPath();
   for (let p = 0; p < NP; p++) { let hi = -Infinity; for (let fr = 0; fr < NF; fr++) hi = Math.max(hi, base.f(fr, p)); p ? ctx.lineTo(X(P.chainage_km[p]), Y(hi)) : ctx.moveTo(X(P.chainage_km[p]), Y(hi)); }
   for (let p = NP - 1; p >= 0; p--) { let lo = Infinity; for (let fr = 0; fr < NF; fr++) lo = Math.min(lo, base.f(fr, p)); ctx.lineTo(X(P.chainage_km[p]), Y(lo)); }
