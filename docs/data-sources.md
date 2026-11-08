@@ -123,7 +123,7 @@ Last 72 hours (5–8 Nov 2026): council gauge E1855 (AHD) compared with MSQ's of
 2. **(Done 8 Nov 2026: `fetch_bar.py`, `data/bar_2027_10min.csv`.)** **Do item 13 soon.** The 2027 data is out. Sort out the 72,620-row question and the 1.32 vs 1.351 m Bar MSL while doing it.
 3. **(Done the same way.)** **Item 12:** fetch the Bar predictions through the datastore API, and keep a copy in `data/` so builds don't depend on the API being up. Decide when doing item 13.
 4. **Offline comparison (item 8):** start at Port Office. Compare three things there: our model, MSQ's official prediction and the measured level. Then work upriver with the council gauges. Use the MSQ Bar and Pinkenba archives for longer history near the mouth.
-5. **Item 7 (live page):** the council gauges and the prediction API both work from a page directly. The Bar's live reading would need a server-side step, or can be left out.
+5. **(First version done 8 Nov 2026: the gauges page, council gauges only.)** **Item 7 (live page):** the council gauges and the prediction API both work from a page directly. The Bar's live reading would need a server-side step, or can be left out.
 6. **Item 9:** WMIP gives upstream flow (Savages Crossing). Tributary gauges and dam releases still need finding.
 
 ## Open questions

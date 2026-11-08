@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brisbane River Gauges</title>
+<!-- Same pinned libraries as predictions_template.html; see the note there. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/deck.gl@9.4.1/dist.min.js"></script>
+<style>
+  :root { --fg:#1d2329; --muted:#5d6873; --line:#d5dbe0; --bg:#f6f7f8; --panel:#ffffff; --accent:#1f6fb2; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display:flex; flex-direction:column; }
+  header { padding:8px 16px; display:flex; flex-wrap:wrap; gap:4px 16px; align-items:baseline; }
+  header h1 { font-size:16px; margin:0; }
+  header .sub { color:var(--muted); font-size:12px; }
+  #status.err { color:#a3261b; font-weight:600; }
+  /* Links between the pages; the same block is in predictions_template.html. */
+  nav.pages { width:100%; display:flex; gap:14px; font-size:13px; }
+  nav.pages a { color:var(--accent); text-decoration:none; }
+  nav.pages a[aria-current] { color:var(--fg); font-weight:600; }
+  #map { position:relative; flex: 1 1 58vh; min-height:300px; }
+  #controls { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; padding:8px 16px;
+    background:var(--panel); border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  #controls label { display:flex; gap:6px; align-items:center; color:var(--muted); font-size:12px; }
+  #controls select, #controls button { font:inherit; }
+  #win { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+  #time { flex: 1 1 260px; display:flex; gap:8px; align-items:center; }
+  #time input { flex:1; min-width:0; }
+  #clock { font-variant-numeric: tabular-nums; min-width: 15ch; font-weight:600; }
+  #play { width: 5.5em; }
+  #legend { display:flex; gap:10px; align-items:center; font-size:12px; color:var(--muted); }
+  #legend .sw { display:inline-block; width:12px; height:12px; border-radius:2px; vertical-align:-2px; margin-right:4px; }
+  #legend .ramp { width:120px; height:10px; border-radius:2px; }
+  #profileWrap { position:relative; flex: 0 0 30vh; min-height:200px; background:var(--panel); }
+  #profile { width:100%; height:100%; display:block; }
+  #ptip { position:absolute; pointer-events:none; background:rgba(29,35,41,.92); color:#fff; padding:4px 8px;
+    border-radius:4px; font-size:12px; display:none; white-space:nowrap; }
+  footer { padding:6px 16px 10px; font-size:11px; color:var(--muted); }
+  footer p { margin:2px 0; }
+  footer a { color:var(--accent); }
+  .warn { color:#8a4b00; }
+  .deck-tooltip { font-size:12px !important; }
+</style>
+</head>
+<body>
+<header>
+  <nav class="pages"><a href="index.html">Predictions</a><a href="gauges.html" aria-current="page">Gauges (measured)</a></nav>
+  <h1>Brisbane River gauges: Breakfast Creek to Moggill</h1>
+  <span class="sub" id="subtitle">Loading the latest readings…</span>
+  <span class="sub" id="status"></span>
+</header>
+
+<div id="map"></div>
+
+<div id="controls">
+  <div id="win">
+    <button id="refresh" type="button" title="Fetch the latest readings">⟳ Refresh</button>
+    <select id="hours" aria-label="Window length" title="How far back to show">
+      <option value="24" selected>last 24 h</option><option value="48">last 48 h</option><option value="72">last 72 h</option>
+    </select>
+  </div>
+  <div id="time">
+    <button id="play" type="button">▶ Play</button>
+    <input id="slider" type="range" min="0" max="0" step="1" value="0" aria-label="Time">
+    <span id="clock"></span>
+  </div>
+  <label>Speed
+    <select id="speed"><option value="5">slow</option><option value="12" selected>normal</option><option value="30">fast</option></select>
+  </label>
+  <label>Colour
+    <select id="colour">
+      <option value="dir" selected>Rising / falling</option>
+      <option value="rate">Rate of change</option>
+    </select>
+  </label>
+  <label>Height
+    <select id="base">
+      <option value="ahd" selected>m AHD</option>
+      <option value="mean">Minus window mean</option>
+    </select>
+  </label>
+  <label>Bar scale
+    <input id="exag" type="range" min="500" max="5000" step="100" value="2000" aria-label="Vertical exaggeration">
+  </label>
+  <div id="legend"></div>
+</div>
+
+<div id="profileWrap"><canvas id="profile"></canvas><div id="ptip"></div></div>
+
+<footer>
+  <p><b>Measured water levels, as published.</b> Brisbane City Council's raw, unchecked gauge readings, fetched
+    live when this page opens (the council keeps 72 hours). Readings arrive at irregular times, and some gauges' come in
+    batches up to a couple of hours late. Gaps of up to an hour are bridged by a straight line (off by at most a
+    few cm); longer gaps, and gauges that haven't caught up yet, show as <i>no reading</i>. Nothing here is a forecast:
+    for predicted tides use the <a href="index.html">Predictions</a> page. <b>Not a flood warning service</b>:
+    for warnings see the <a href="https://www.bom.gov.au/qld/flood/">Bureau of Meteorology</a>.</p>
+  <p class="warn">Heights are metres <b>AHD</b> (Australian Height Datum, roughly mean sea level), one datum for
+    every gauge, so unlike the predictions these do form a real water surface. The predictions page uses each
+    place's own LAT instead, about 1.2 m lower at Port Office, so the numbers differ. Jindalee and Moggill have not
+    read below about 0 m AHD in the readings checked so far: their lowest tides may not be recorded in full.</p>
+  <p>Data: Telemetry sensors — Rainfall and Stream heights © Brisbane City Council, CC BY 4.0. Station names:
+    Maritime Safety Queensland tidal planes © State of Queensland, CC BY 4.0. River centreline: Watercourse lines -
+    Queensland © State of Queensland (Department of Resources), CC BY 4.0. Basemap attribution on the map.</p>
+  <p id="built" hidden></p>
+</footer>
+
+<script>
+"use strict";
+// ---- Data, inlined by build_gauges.py ---------------------------------------------
+// Gauge list (downstream to upstream) with chainage, the river line, MSQ station names.
+// The readings themselves are fetched below when the page opens.
+const DATA = /*__DATA__*/null;
+const GAUGES = DATA.gauges, NG = GAUGES.length, KM_MAX = DATA.meta.km_max;
+const $ = id => document.getElementById(id);
+
+// ---- Time -------------------------------------------------------------------------
+// Readings come in 5-minute slots; frames use the same step. All times are kept as
+// real instants (ms since 1970, UTC) and shown in AEST (UTC+10, no daylight saving).
+const MIN_MS = 60000, STEP_MS = 5 * MIN_MS, dtHours = STEP_MS / 3600000;
+const AEST_MS = 10 * 3600000;
+// Bridge gaps up to this; longer = no reading. Checked 2026-11-08: most gaps between
+// readings are 5-30 min and 30-60 min gaps are common. A straight line across an hour
+// of tide is off by at most about 3 cm (amplitude 1 m, M2 period), fine for display.
+const GAP_MAX_MS = 60 * MIN_MS;
+const RATE_HALF_MS = 15 * MIN_MS;   // rising/falling from the change over +-15 min
+
+function fmtTime(ms) {               // "Sun, 8 Nov 15:45" in AEST
+  const d = new Date(ms + AEST_MS);
+  return d.toLocaleDateString("en-AU", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" })
+    + " " + d.toISOString().slice(11, 16);
+}
+if (DATA.meta.built) {
+  $("built").textContent = `Page built ${fmtTime(Date.parse(DATA.meta.built + ":00+10:00"))} AEST `
+    + `(the readings are fetched live).`;
+  $("built").hidden = false;
+}
+
+// ---- Readings ---------------------------------------------------------------------
+// series[g] = [[ms, value], ...] sorted by time, empty slots left out.
+let series = GAUGES.map(() => []);
+let fetchedAt = 0;
+
+async function fetchReadings() {
+  const ids = GAUGES.map(g => `"${g.id}"`).join(", ");
+  const url = DATA.meta.source + "?" + new URLSearchParams({
+    where: `gauge in (${ids}) and value is not null`,
+    select: "measured, gauge, value",
+  });
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`the council's data service answered ${resp.status}`);
+  const rows = await resp.json();
+  const byId = Object.fromEntries(GAUGES.map((g, i) => [g.id, i]));
+  const out = GAUGES.map(() => []);
+  for (const r of rows) {
+    const i = byId[r.gauge], t = Date.parse(r.measured);
+    if (i !== undefined && Number.isFinite(t) && Number.isFinite(r.value)) out[i].push([t, r.value]);
+  }
+  for (const s of out) s.sort((a, b) => a[0] - b[0]);
+  return out;
+}
+
+// Value of gauge g at time t: a reading at t, or a straight line between the readings
+// either side if they are at most GAP_MAX_MS apart; otherwise NaN (no reading).
+// Never extends past a gauge's first or last reading.
+function valueAt(g, t) {
+  const s = series[g];
+  let lo = 0, hi = s.length - 1;
+  if (hi < 0 || t < s[0][0] || t > s[hi][0]) return NaN;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (s[mid][0] <= t) lo = mid; else hi = mid; }
+  if (s[lo][0] === t) return s[lo][1];
+  if (s[hi][0] === t) return s[hi][1];
+  const [t0, v0] = s[lo], [t1, v1] = s[hi];
+  if (t1 - t0 > GAP_MAX_MS) return NaN;
+  return v0 + (v1 - v0) * (t - t0) / (t1 - t0);
+}
+
+// ---- The window shown ---------------------------------------------------------------
+// It ends at the time at least half the gauges have reached (the lower median of their
+// latest-reading times) and runs back state.hours from there. Each gauge's latest
+// reading arrives at a different time, and some publish in batches up to a couple of
+// hours late: ending at the newest reading leaves the last frame almost empty, ending at
+// the slowest gauge leaves the page hours out of date. Gauges that haven't reached the
+// end yet show "no reading yet" (nothing is filled in past a gauge's last reading).
+let TIMES = [], H = [], NF = 0, rate = [], RATE_MAX = 1, endMs = 0;
+const BASES = {
+  ahd: { label: "m AHD", f: (fr, g) => H[fr][g] },
+  mean: { label: "m relative to the window mean", f: (fr, g) => H[fr][g] - BASES.mean.mean[g] },
+};
+function pct95abs(values) {
+  const v = values.filter(Number.isFinite).map(Math.abs).sort((x, y) => x - y);
+  return v.length ? v[Math.floor(0.95 * (v.length - 1))] || 1 : 1;
+}
+function setWindow(hours) {
+  const lasts = series.filter(s => s.length).map(s => s[s.length - 1][0]);
+  if (!lasts.length) { NF = 0; return; }
+  lasts.sort((a, b) => a - b);
+  endMs = Math.floor(lasts[Math.floor((lasts.length - 1) / 2)] / STEP_MS) * STEP_MS;
+  const startMs = endMs - hours * 3600000;
+  TIMES = []; for (let t = startMs; t <= endMs; t += STEP_MS) TIMES.push(t);
+  NF = TIMES.length;
+  H = TIMES.map(t => GAUGES.map((_, g) => valueAt(g, t)));
+  // rate[f][g], m/h, from about 15 min either side (one-sided at the window ends).
+  rate = TIMES.map(t => GAUGES.map((_, g) => {
+    const a = Math.max(startMs, t - RATE_HALF_MS), b = Math.min(endMs, t + RATE_HALF_MS);
+    return (valueAt(g, b) - valueAt(g, a)) / ((b - a) / 3600000);
+  }));
+  RATE_MAX = pct95abs(rate.flat());
+  BASES.mean.mean = GAUGES.map((_, g) => {
+    const v = H.map(row => row[g]).filter(Number.isFinite);
+    return v.length ? v.reduce((x, y) => x + y, 0) / v.length : NaN;
+  });
+  // Per baseline: lowest (floor, at most 0) and highest value over the window, and each
+  // gauge's own range (the profile's envelope). Missing values are skipped.
+  for (const b of Object.values(BASES)) {
+    b.envLo = GAUGES.map(() => Infinity); b.envHi = GAUGES.map(() => -Infinity);
+    for (let f = 0; f < NF; f++) for (let g = 0; g < NG; g++) {
+      const v = b.f(f, g);
+      if (Number.isFinite(v)) { b.envLo[g] = Math.min(b.envLo[g], v); b.envHi[g] = Math.max(b.envHi[g], v); }
+    }
+    const lo = b.envLo.filter(Number.isFinite), hi = b.envHi.filter(Number.isFinite);
+    b.floor = Math.min(0, ...lo); b.max = Math.max(0.5, ...hi);
+  }
+}
+
+// ---- Colours (as the predictions page) ----------------------------------------------
+const RED = [178, 24, 43], BLUE = [33, 102, 172], MID = [235, 235, 235];
+const C_RISE = [214, 96, 77], C_FALL = [67, 147, 195], C_SLACK = [170, 170, 170];
+const C_NONE = [215, 215, 215];     // no reading
+// |dh/dt| below 2 cm/h is "near slack". The readings are whole centimetres, so over
+// 30 minutes a 1 cm change (2 cm/h) still counts as slack.
+const SLACK_M_PER_H = 0.02;
+function diverge(v, max) {
+  const t = Math.max(-1, Math.min(1, v / max));
+  const end = t >= 0 ? RED : BLUE, k = Math.abs(t);
+  return MID.map((m, i) => Math.round(m + (end[i] - m) * k));
+}
+const COLOURS = {
+  dir: (f, g) => !Number.isFinite(rate[f][g]) ? C_NONE
+    : rate[f][g] > SLACK_M_PER_H ? C_RISE : rate[f][g] < -SLACK_M_PER_H ? C_FALL : C_SLACK,
+  rate: (f, g) => !Number.isFinite(rate[f][g]) ? C_NONE : diverge(rate[f][g], RATE_MAX),
+};
+const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+function renderLegend() {
+  const el = $("legend");
+  const none = `<span><span class="sw" style="background:${css(C_NONE)}"></span>no reading</span>`;
+  if (state.colour === "dir") {
+    el.innerHTML = `<span><span class="sw" style="background:${css(C_RISE)}"></span>rising</span>
+      <span><span class="sw" style="background:${css(C_FALL)}"></span>falling</span>
+      <span><span class="sw" style="background:${css(C_SLACK)}"></span>near slack</span>${none}`;
+  } else {
+    const ramp = `<span class="sw ramp" style="background:linear-gradient(90deg,${css(BLUE)},${css(MID)},${css(RED)})"></span>`;
+    el.innerHTML = `<span>−${RATE_MAX.toFixed(2)}</span>${ramp}<span>+${RATE_MAX.toFixed(2)} m/h</span>${none}`;
+  }
+}
+
+// ---- State ------------------------------------------------------------------------
+const state = { frame: 0, colour: "dir", base: "ahd", exag: +$("exag").value, playing: false,
+                hours: +$("hours").value };
+const slider = $("slider");
+
+// ---- Map ----------------------------------------------------------------------------
+// As on the predictions page: if the map can't start, say so and carry on.
+const mapEl = $("map");
+function showNoMap(err) {
+  console.error("3D map unavailable:", err);
+  const msg = document.createElement("p");
+  msg.style.cssText = "position:absolute;inset:auto 16px 16px 16px;margin:0;padding:8px 12px;z-index:3;"
+    + "background:var(--panel);border:1px solid var(--line);border-radius:4px;color:var(--muted)";
+  msg.textContent = "The 3D map couldn't start in this browser (it needs WebGL and an internet "
+    + "connection). The profile and controls below still work.";
+  mapEl.appendChild(msg);
+}
+// Basemap: OpenFreeMap, as on the predictions page (attribution added by MapLibre).
+const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
+let map = null;
+try {
+  // Opening view picked by eye to frame Breakfast Creek -> Moggill.
+  map = new maplibregl.Map({
+    container: "map", style: MAP_STYLE,
+    center: [152.955, -27.51], zoom: 11, pitch: 55, bearing: -15, maxPitch: 75,
+  });
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+} catch (err) {
+  map = null;
+  showNoMap(err);
+}
+
+// Gauge callouts: same layout as the station callouts on the predictions page (label
+// hangs down the screen on a leader line; overlapping labels take a longer drop).
+const DROPS = [34, 58, 82, 106, 130], EDGE_PX = 50, GAP_PX = 3;
+const calloutLayer = document.createElement("div");
+calloutLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:2;overflow:hidden";
+const svgNS = "http://www.w3.org/2000/svg", leaderSvg = document.createElementNS(svgNS, "svg");
+leaderSvg.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
+calloutLayer.appendChild(leaderSvg);
+if (map) mapEl.appendChild(calloutLayer);
+const callouts = !map ? [] : GAUGES.map(s => {
+  const line = document.createElementNS(svgNS, "line");
+  line.setAttribute("stroke", "rgba(29,35,41,.7)"); line.setAttribute("stroke-width", "1.2");
+  const dot = document.createElementNS(svgNS, "circle");
+  dot.setAttribute("r", "4"); dot.setAttribute("fill", "#1d2329");
+  dot.setAttribute("stroke", "#fff"); dot.setAttribute("stroke-width", "1.5");
+  leaderSvg.append(line, dot);
+  const label = document.createElement("div");
+  label.textContent = s.short;
+  label.style.cssText = "position:absolute;font:12px system-ui,sans-serif;color:#1d2329;background:rgba(255,255,255,.93);"
+    + "border:1px solid rgba(29,35,41,.35);border-radius:3px;padding:1px 5px;white-space:nowrap";
+  calloutLayer.appendChild(label);
+  return { s, line, dot, label, w: 0, h: 0 };
+});
+function layoutCallouts() {
+  const W = mapEl.clientWidth, Hm = mapEl.clientHeight, placed = [];
+  const items = callouts.map(c => {
+    if (!c.w) { c.w = c.label.offsetWidth; c.h = c.label.offsetHeight; }
+    const p = map.project([c.s.lon, c.s.lat]);
+    return { c, x: p.x, y: p.y };
+  }).sort((a, b) => a.x - b.x);
+  for (const { c, x, y } of items) {
+    const show = x > -EDGE_PX && x < W + EDGE_PX && y > -EDGE_PX && y < Hm + EDGE_PX;
+    for (const el of [c.line, c.dot, c.label]) el.style.display = show ? "" : "none";
+    if (!show) continue;
+    const left = Math.max(2, Math.min(W - c.w - 2, x - c.w / 2));
+    let drop = DROPS[DROPS.length - 1];
+    for (const d of DROPS) {
+      const box = [left - GAP_PX, y + d, left + c.w + GAP_PX, y + d + c.h];
+      if (!placed.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) { drop = d; break; }
+    }
+    placed.push([left - GAP_PX, y + drop, left + c.w + GAP_PX, y + drop + c.h]);
+    c.line.setAttribute("x1", x); c.line.setAttribute("y1", y);
+    c.line.setAttribute("x2", x); c.line.setAttribute("y2", y + drop);
+    c.dot.setAttribute("cx", x); c.dot.setAttribute("cy", y);
+    c.label.style.left = left + "px"; c.label.style.top = (y + drop) + "px";
+  }
+}
+if (map) { map.on("render", layoutCallouts); map.on("load", layoutCallouts); }
+
+// Columns at the gauges' real positions, over a thin line along the river.
+const RIVER_PATH = DATA.river.lon.map((x, i) => [x, DATA.river.lat[i]]);
+const BAR_RADIUS_M = 220;
+const idx = Array.from({ length: NG }, (_, i) => i);
+function layers() {
+  if (!NF) return [];
+  const base = BASES[state.base], colourFn = COLOURS[state.colour], f = state.frame;
+  return [
+    new deck.PathLayer({
+      id: "river", data: [RIVER_PATH], getPath: d => d, getColor: [31, 111, 178, 110],
+      getWidth: 3, widthUnits: "pixels",
+    }),
+    new deck.ColumnLayer({
+      id: "bars", data: idx, diskResolution: 16, radius: BAR_RADIUS_M, extruded: true, pickable: true,
+      getPosition: i => [GAUGES[i].lon, GAUGES[i].lat],
+      // No reading: a flat grey disc.
+      getElevation: i => { const v = base.f(f, i); return Number.isFinite(v) ? (v - base.floor) * state.exag : 0; },
+      getFillColor: i => colourFn(f, i),
+      updateTriggers: { getElevation: [f, state.base, state.exag, endMs, NF], getFillColor: [f, state.colour, endMs, NF] },
+      transitions: { getElevation: 120 },
+    }),
+  ];
+}
+let overlay = null;
+if (map) {
+  try {
+    overlay = new deck.MapboxOverlay({
+      interleaved: false, layers: layers(),
+      getTooltip: ({ index, layer }) => layer && layer.id === "bars" && index >= 0 ? { text: tipText(state.frame, index) } : null,
+    });
+    map.addControl(overlay);
+  } catch (err) {
+    overlay = null;
+    showNoMap(err);
+  }
+}
+
+function tipText(f, g) {
+  const v = H[f][g], r = rate[f][g], G = GAUGES[g];
+  const head = `${G.name}  (km ${G.chainage_km.toFixed(1)}, BoM ${G.bom})`;
+  if (!Number.isFinite(v)) {
+    const s = series[g], last = s.length ? s[s.length - 1][0] : -Infinity;
+    return `${head}\n` + (TIMES[f] > last
+      ? `no reading yet (last at ${s.length ? fmtTime(last) : "none in 72 h"})`
+      : "no reading (gap of over an hour)");
+  }
+  return `${head}\n${v.toFixed(2)} m AHD   ${(v - BASES.mean.mean[g]).toFixed(2)} m vs window mean\n`
+    + (Number.isFinite(r) ? `rate ${r >= 0 ? "+" : ""}${r.toFixed(2)} m/h` : "rate: not enough readings");
+}
+
+// ---- Profile ------------------------------------------------------------------------
+// The gauges along the river by km: each gauge's range over the window (light bar),
+// its value now (dot, coloured as on the map), and a line joining neighbouring gauges
+// that both have a reading. Station names along the bottom, gauge names along the top.
+const cv = $("profile"), ctx = cv.getContext("2d"), ptip = $("ptip");
+const FONT = "11px system-ui, sans-serif";
+const LABEL_ANGLE = 0.6, LABEL_DROP = 18, MIN_LABEL_GAP_PX = 20;
+ctx.font = FONT;
+const NAME_W = Math.max(...DATA.stations.map(s => ctx.measureText(s.short).width));
+const PAD = { l: 64, r: 16, t: 34,
+  b: Math.ceil(LABEL_DROP + NAME_W * Math.sin(LABEL_ANGLE) + 8 * Math.cos(LABEL_ANGLE)) + 6 };
+
+function sizeCanvas() {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function drawProfile() {
+  const r = cv.getBoundingClientRect(), W = r.width, Ht = r.height;
+  ctx.clearRect(0, 0, W, Ht);
+  ctx.font = FONT;
+  if (!NF) return;
+  const base = BASES[state.base], f = state.frame, colourFn = COLOURS[state.colour];
+  const yLo = Math.floor(base.floor * 2) / 2, yHi = Math.ceil(base.max * 2) / 2;
+  const X = km => PAD.l + (km / KM_MAX) * (W - PAD.l - PAD.r);
+  const Y = v => PAD.t + (1 - (v - yLo) / (yHi - yLo)) * (Ht - PAD.t - PAD.b);
+
+  // Gridlines and y labels
+  ctx.strokeStyle = "#e3e7ea"; ctx.fillStyle = "#5d6873"; ctx.textAlign = "right"; ctx.lineWidth = 1;
+  for (let v = yLo; v <= yHi + 1e-9; v += 0.5) {
+    ctx.beginPath(); ctx.moveTo(PAD.l, Y(v)); ctx.lineTo(W - PAD.r, Y(v)); ctx.stroke();
+    ctx.fillText(v.toFixed(1), PAD.l - 6, Y(v) + 4);
+  }
+  ctx.strokeStyle = "#9aa4ad";
+  ctx.beginPath(); ctx.moveTo(PAD.l, Y(0)); ctx.lineTo(W - PAD.r, Y(0)); ctx.stroke();
+  ctx.save(); ctx.translate(14, (PAD.t + Ht - PAD.b) / 2); ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = "center"; ctx.fillText(base.label, 0, 0); ctx.restore();
+
+  // Each gauge's range over the window
+  ctx.fillStyle = "rgba(31,111,178,.13)";
+  for (let g = 0; g < NG; g++) {
+    if (!Number.isFinite(base.envLo[g])) continue;
+    const x = X(GAUGES[g].chainage_km);
+    ctx.fillRect(x - 5, Y(base.envHi[g]), 10, Y(base.envLo[g]) - Y(base.envHi[g]));
+  }
+  // Line joining neighbours that both have a reading now
+  ctx.strokeStyle = "#1d2329"; ctx.lineWidth = 1.5; ctx.beginPath();
+  let pen = false;
+  for (let g = 0; g < NG; g++) {
+    const v = base.f(f, g), x = X(GAUGES[g].chainage_km);
+    if (!Number.isFinite(v)) { pen = false; continue; }
+    pen ? ctx.lineTo(x, Y(v)) : ctx.moveTo(x, Y(v)); pen = true;
+  }
+  ctx.stroke();
+  // Dots: coloured now-values; hollow grey at the zero line for no reading
+  for (let g = 0; g < NG; g++) {
+    const v = base.f(f, g), x = X(GAUGES[g].chainage_km);
+    ctx.beginPath();
+    if (Number.isFinite(v)) {
+      ctx.arc(x, Y(v), 5, 0, 2 * Math.PI); ctx.fillStyle = css(colourFn(f, g)); ctx.fill();
+      ctx.strokeStyle = "#1d2329"; ctx.lineWidth = 1; ctx.stroke();
+    } else {
+      ctx.arc(x, Y(0), 5, 0, 2 * Math.PI); ctx.strokeStyle = "#9aa4ad"; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+  }
+  // Gauge names along the top, in up to two rows so close neighbours don't overlap
+  // (City Gauge and Port Office are only 200 m apart).
+  ctx.fillStyle = "#1d2329"; ctx.textAlign = "center";
+  const rowEnd = [-Infinity, -Infinity];
+  for (const G of GAUGES) {
+    const x = X(G.chainage_km), w = ctx.measureText(G.short).width;
+    const row = rowEnd.findIndex(e => x - w / 2 > e + 4);
+    if (row < 0) continue;
+    ctx.fillText(G.short, x, 12 + row * 13);
+    rowEnd[row] = x + w / 2;
+  }
+  // x axis: km and MSQ station names, as on the predictions page
+  ctx.fillStyle = "#5d6873"; ctx.strokeStyle = "#9aa4ad"; ctx.lineWidth = 1; ctx.textAlign = "center";
+  for (let km = 0; km <= KM_MAX; km += 10) ctx.fillText(km, X(km), Ht - PAD.b + 12);
+  ctx.textAlign = "left"; ctx.fillText("km", X(KM_MAX) - 14, Ht - PAD.b + 12);
+  let lastNameX = -Infinity;
+  for (const s of DATA.stations) {
+    const x = X(s.chainage_km);
+    ctx.beginPath(); ctx.moveTo(x, Ht - PAD.b); ctx.lineTo(x, Ht - PAD.b + 3); ctx.stroke();
+    if (x - lastNameX < MIN_LABEL_GAP_PX) continue;
+    lastNameX = x;
+    ctx.save(); ctx.translate(x, Ht - PAD.b + LABEL_DROP); ctx.rotate(-LABEL_ANGLE); ctx.textAlign = "right";
+    ctx.fillText(s.short, 0, 8); ctx.restore();
+  }
+}
+function showProfileTip(e) {
+  if (!NF) return;
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left;
+  const km = (x - PAD.l) / (r.width - PAD.l - PAD.r) * KM_MAX;
+  let g = 0, best = Infinity;
+  for (let i = 0; i < NG; i++) { const d = Math.abs(GAUGES[i].chainage_km - km); if (d < best) { best = d; g = i; } }
+  if (km < 0 || km > KM_MAX) { ptip.style.display = "none"; return; }
+  ptip.textContent = tipText(state.frame, g).replace(/\n/g, "  ·  ");
+  ptip.style.display = "block";
+  ptip.style.left = Math.max(4, Math.min(x + 12, r.width - ptip.offsetWidth - 4)) + "px"; ptip.style.top = "6px";
+}
+cv.addEventListener("pointermove", showProfileTip);
+cv.addEventListener("pointerdown", showProfileTip);
+cv.addEventListener("pointerleave", () => { ptip.style.display = "none"; });
+
+// ---- Wiring -------------------------------------------------------------------------
+function update() {
+  slider.value = state.frame;
+  $("clock").textContent = NF ? fmtTime(TIMES[state.frame]) + " AEST" : "";
+  if (overlay) overlay.setProps({ layers: layers() });
+  drawProfile();
+}
+function renderSubtitle() {
+  if (!NF) { $("subtitle").textContent = "No readings available."; return; }
+  const ago = Math.round((Date.now() - endMs) / MIN_MS);
+  $("subtitle").textContent = `Measured, ${fmtTime(TIMES[0])} to ${fmtTime(endMs)} AEST `
+    + `(latest ${ago} min ago), 5-min steps, m AHD`;
+}
+// Rebuild the window. atEnd: stay on the newest frame (true when it was already there).
+function applyWindow(atEnd) {
+  setWindow(state.hours);
+  slider.max = Math.max(0, NF - 1);
+  state.frame = atEnd ? NF - 1 : Math.min(state.frame, NF - 1);
+  renderSubtitle(); renderLegend(); update();
+}
+async function load() {
+  const atEnd = !NF || state.frame === NF - 1;
+  $("status").textContent = "Fetching…"; $("status").className = "sub";
+  $("refresh").disabled = true;
+  try {
+    series = await fetchReadings();
+    fetchedAt = Date.now();
+    $("status").textContent = "";
+    applyWindow(atEnd);
+  } catch (err) {
+    console.error(err);
+    $("status").textContent = `Couldn't fetch the readings (${err.message}). Try ⟳ Refresh.`;
+    $("status").className = "sub err";
+  } finally {
+    $("refresh").disabled = false;
+  }
+}
+$("refresh").addEventListener("click", load);
+$("hours").addEventListener("change", e => { state.hours = +e.target.value; applyWindow(true); });
+slider.addEventListener("input", () => { state.frame = +slider.value; update(); });
+$("colour").addEventListener("change", e => { state.colour = e.target.value; renderLegend(); update(); });
+$("base").addEventListener("change", e => { state.base = e.target.value; update(); });
+$("exag").addEventListener("input", e => { state.exag = +e.target.value; update(); });
+
+// Playback: Speed values are frames (5 min each) per second; loops at the end.
+let timer = null;
+function setPlaying(on) {
+  state.playing = on && NF > 1; $("play").textContent = state.playing ? "❚❚ Pause" : "▶ Play";
+  clearInterval(timer);
+  if (state.playing) timer = setInterval(() => { state.frame = (state.frame + 1) % NF; update(); }, 1000 / +$("speed").value);
+}
+$("play").addEventListener("click", () => setPlaying(!state.playing));
+$("speed").addEventListener("change", () => { if (state.playing) setPlaying(true); });
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT") return;
+  if (e.key === " ") { e.preventDefault(); setPlaying(!state.playing); }
+  if (e.target === slider || !NF) return;
+  if (e.key === "ArrowRight") { state.frame = Math.min(NF - 1, state.frame + 1); update(); }
+  if (e.key === "ArrowLeft") { state.frame = Math.max(0, state.frame - 1); update(); }
+});
+window.addEventListener("resize", () => { sizeCanvas(); drawProfile(); });
+// The "latest N min ago" note goes stale while the page stays open; refresh it.
+setInterval(() => { if (NF) renderSubtitle(); }, MIN_MS);
+
+sizeCanvas(); renderLegend(); load();
+</script>
+</body>
+</html>

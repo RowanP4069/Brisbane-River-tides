@@ -1,0 +1,9 @@
+sensor_id,bom_no,name,short,lat,lon,datum,unit,chainage_km,offset_m
+E1594,540286,"Mouth of Breakfast Ck, Newstead",Breakfast Ck,-27.441564,153.047296,Stream Height AHD,m,12.87,240
+E1857,540685,Hawthorne AL,Hawthorne,-27.46025,153.053569,Stream Height AHD,m,14.92,119
+E6749,540198,Brisbane City Gauge AL,City Gauge,-27.4698,153.0343,Stream Height AHD,m,20.25,151
+E1855,540684,Port Office Gauge,Port Office,-27.471705,153.030841,Stream Height AHD,m,20.44,201
+E1856,540683,St Lucia AL,St Lucia,-27.504001,153.005872,Stream Height AHD,m,31.86,105
+E1588,540274,"Mouth of Oxley Ck, Graceville",Oxley Ck,-27.524684,152.994663,Stream Height AHD,m,36.35,232
+E1765,540682,Jindalee (BCC) AL,Jindalee,-27.531969,152.928725,Stream Height AHD,m,49.87,172
+E1764,540201,Moggill (BCC) AL,Moggill,-27.587144,152.864111,Stream Height AHD,m,66.8,279

@@ -2,7 +2,7 @@
 """Check that the page's JavaScript model gives the same heights as river_tides.py.
 
 The page works out heights itself for whichever day the viewer picks (the "Model"
-block in web/river_tides_template.html). Python stays the source of truth: for each
+block in web/predictions_template.html). Python stays the source of truth: for each
 test window this script
 
   1. runs river_tides.py --json to get Python's heights for that window, and
@@ -27,7 +27,7 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).parent
-TEMPLATE = HERE / "web" / "river_tides_template.html"
+TEMPLATE = HERE / "web" / "predictions_template.html"
 TOLERANCE_M = 0.0005 + 1e-9         # Python rounds to 1 mm
 
 # (start, hours): start as for river_tides.py --start

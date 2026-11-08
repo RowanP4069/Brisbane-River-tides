@@ -1,5 +1,6 @@
-# Builds the page and publishes it to GitHub Pages:
-#   https://rowanp4069.github.io/Brisbane-River-tides/
+# Builds the pages and publishes them to GitHub Pages:
+#   https://rowanp4069.github.io/Brisbane-River-tides/             predictions
+#   https://rowanp4069.github.io/Brisbane-River-tides/gauges.html  measured gauges
 # The generated HTML is not committed; each run makes a fresh one.
 #
 # Needs, once: repo Settings -> Pages -> Source: GitHub Actions.
@@ -43,6 +44,8 @@ jobs:
       # viewer's today, so a rebuild isn't needed to keep it current; the nightly run
       # refreshes the "Predictions built ... AEST" stamp (--stamp) and shows breakage early.
       - run: python river_tides.py --stamp --out site/index.html
+      # The gauges page fetches its readings live; this only builds the page itself.
+      - run: python build_gauges.py --stamp --out site/gauges.html
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site

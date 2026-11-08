@@ -19,6 +19,10 @@
   header { padding:8px 16px; display:flex; flex-wrap:wrap; gap:4px 16px; align-items:baseline; }
   header h1 { font-size:16px; margin:0; }
   header .sub { color:var(--muted); font-size:12px; }
+  /* Links between the pages; the same block is in gauges_template.html. */
+  nav.pages { width:100%; display:flex; gap:14px; font-size:13px; }
+  nav.pages a { color:var(--accent); text-decoration:none; }
+  nav.pages a[aria-current] { color:var(--fg); font-weight:600; }
   #map { position:relative; flex: 1 1 58vh; min-height:300px; }
   #controls { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; padding:8px 16px;
     background:var(--panel); border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
@@ -45,6 +49,7 @@
 </head>
 <body>
 <header>
+  <nav class="pages"><a href="index.html" aria-current="page">Predictions</a><a href="gauges.html">Gauges (measured)</a></nav>
   <h1>Brisbane River tides: Brisbane Bar to Kholo Creek</h1>
   <span class="sub" id="subtitle"></span>
 </header>

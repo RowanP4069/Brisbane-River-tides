@@ -32,7 +32,7 @@ Needs Python 3 (developed on 3.14). From the project folder:
     .venv/bin/pip install -r requirements.txt
     .venv/bin/python river_tides.py --start 2026-11-08
 
-You only need this to make a page for other dates or settings; the hosted page above is built the same way. This writes `output/river_tides.html`, which can show any day the Bar data covers. Open it in a web browser. The page needs an internet connection for the map libraries and tiles, and the 3D map needs WebGL (without it, the profile and controls still work).
+You only need this to make a page for other dates or settings; the hosted page above is built the same way. This writes `output/index.html` (the predictions page), which can show any day the Bar data covers. `.venv/bin/python build_gauges.py` writes `output/gauges.html` next to it. Open it in a web browser. The page needs an internet connection for the map libraries and tiles, and the 3D map needs WebGL (without it, the profile and controls still work).
 
 Useful options (`--help` lists them all):
 
@@ -46,7 +46,18 @@ The page computes each day's heights itself, with the same formula as `river_tid
 
 `build_centreline.py` rebuilds `data/centreline.csv` from the saved watercourse data. You only need it if that data or the station positions change.
 
-## Measured water levels
+## Gauges page (measured)
+
+A second page, **Gauges**, shows what the river actually did: the last 24, 48 or 72 hours of readings from Brisbane City Council's eight Brisbane River gauges, from Breakfast Creek to Moggill. <https://rowanp4069.github.io/Brisbane-River-tides/gauges.html>
+
+- The page fetches the readings **live** from the council's open data service when it opens (⟳ Refresh fetches again). Nothing is forecast.
+- Heights are **metres AHD**, one datum for every gauge, so unlike the predictions they form a real water surface. The predictions use each place's LAT, about 1.2 m lower at Port Office.
+- Readings arrive at irregular times. Gaps of up to an hour are bridged with a straight line; longer gaps, and gauges whose latest readings haven't arrived yet, show as *no reading*.
+- `build_gauges.py` builds it (`output/gauges.html`). `data/gauges.csv` holds each gauge's position along the river; `build_gauges.py --download` remakes it from the council's gauge list.
+
+The two pages link to each other at the top. Locally, `river_tides.py` writes `output/index.html` (predictions), named as on the website so the links work.
+
+## Measured water levels (archive)
 
 `collect_gauges.py` saves measured river levels each day, before the sources drop them: eight Brisbane City Council gauges (Breakfast Creek to Moggill) and the MSQ Brisbane Bar gauge. A scheduled GitHub Action runs it and stores the readings on the [`gauge-data` branch](https://github.com/RowanP4069/Brisbane-River-tides/tree/gauge-data). They aren't used by the page yet; they're for comparing the predictions against what the river actually did. `docs/data-sources.md` describes the sources.
 
@@ -74,4 +85,4 @@ Built with help from Claude (Anthropic), using Claude Code.
 
 ## Licence
 
-The code (`river_tides.py`, `build_centreline.py`, `collect_gauges.py`, `fetch_bar.py`, `check_parity.py` and `web/`) is under the MIT licence; see [LICENSE](LICENSE). The files in `data/` keep their original CC BY 4.0 licences, as listed above.
+The code (`river_tides.py`, `build_centreline.py`, `collect_gauges.py`, `fetch_bar.py`, `check_parity.py`, `build_gauges.py` and `web/`) is under the MIT licence; see [LICENSE](LICENSE). The files in `data/` keep their original CC BY 4.0 licences, as listed above.

@@ -65,6 +65,17 @@ Same source, licence, attribution and format as `bar_2026_10min.csv` above, for 
 
 ---
 
+## `gauges.csv`
+
+The eight Brisbane City Council river gauges shown on the gauges page, downstream to upstream. Made by `python build_gauges.py --download` on 2026-11-08.
+
+- **Source:** the council's gauge list, dataset *Telemetry sensors — Rainfall and Stream heights* (metadata), © Brisbane City Council, CC BY 4.0. <https://data.brisbane.qld.gov.au/explore/dataset/telemetry-sensors-rainfall-and-stream-heights-metadata>
+- **Columns:** `sensor_id`, `bom_no` (the BoM station number), `name`, `lat`, `lon`, `datum` and `unit` are as published. `short` is our short label.
+- **Derived columns:** `chainage_km` is each gauge projected onto the nearest point of `centreline.csv`, and `offset_m` is how far the gauge is from that point. The offsets are 105–279 m: the gauges are on the bank or at creek mouths, while the centreline follows the middle of the river.
+- The gauge readings themselves are not stored here. The page fetches them live, and `collect_gauges.py` archives them on the `gauge-data` branch.
+
+---
+
 ## `stations.csv`
 
 **Source**

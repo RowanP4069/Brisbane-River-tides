@@ -8,7 +8,7 @@ Pipeline:
      secondary-port stations (data/stations.csv)
   -> absolute height per point per frame over the window (48 h by default), for the
      --json reference
-  -> output/river_tides.html: web/river_tides_template.html with the data inlined
+  -> output/index.html: web/predictions_template.html with the data inlined
      (3D map of bars + linked profile; open it from disk in a normal browser). The
      page gets the whole Bar series and each point's lag, ratio and MSL, and works
      out the heights itself for whichever day the viewer picks (check_parity.py
@@ -339,9 +339,9 @@ def main():
                          "window evenly, the window ends on the last whole step")
     ap.add_argument("--spacing-km", type=float, default=0.5,
                     help="distance between bars along the river, km (default: 0.5)")
-    ap.add_argument("--out", default=str(HERE / "output" / "river_tides.html"),
-                    help="page to write (default: output/river_tides.html)")
-    ap.add_argument("--template", default=str(HERE / "web" / "river_tides_template.html"),
+    ap.add_argument("--out", default=str(HERE / "output" / "index.html"),
+                    help="page to write (default: output/index.html, as on the website)")
+    ap.add_argument("--template", default=str(HERE / "web" / "predictions_template.html"),
                     help="page template with the /*__DATA__*/null marker (default: web/)")
     ap.add_argument("--json", help="also write the page data to this JSON file")
     ap.add_argument("--stamp", action="store_true",
