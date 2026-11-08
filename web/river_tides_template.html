@@ -164,9 +164,13 @@ for (const b of Object.values(BASES)) {
 }
 
 // ---- Colours ----------------------------------------------------------------------
+// Two sets of red/blue: strong ends for the fading "rate" and "slope" scales (through
+// light grey MID), and lighter shades for the three-way "rising / falling" mode.
 const RED = [178, 24, 43], BLUE = [33, 102, 172], MID = [235, 235, 235];
 const C_RISE = [214, 96, 77], C_FALL = [67, 147, 195], C_SLACK = [170, 170, 170];
-const SLACK_MPH = 0.02;                       // |dh/dt| below this counts as near slack
+// |dh/dt| below this (metres per hour, i.e. 2 cm/h) is drawn grey as "near slack".
+// A display threshold chosen by eye, not a physical constant.
+const SLACK_M_PER_H = 0.02;
 
 function diverge(v, max) {                    // -max..+max -> blue..grey..red
   const t = Math.max(-1, Math.min(1, v / max));
@@ -174,7 +178,7 @@ function diverge(v, max) {                    // -max..+max -> blue..grey..red
   return MID.map((m, i) => Math.round(m + (end[i] - m) * k));
 }
 const COLOURS = {
-  dir: (f, p) => rate[f][p] > SLACK_MPH ? C_RISE : rate[f][p] < -SLACK_MPH ? C_FALL : C_SLACK,
+  dir: (f, p) => rate[f][p] > SLACK_M_PER_H ? C_RISE : rate[f][p] < -SLACK_M_PER_H ? C_FALL : C_SLACK,
   rate: (f, p) => diverge(rate[f][p], RATE_MAX),
   slope: (f, p) => diverge(slope[f][p], SLOPE_MAX),
 };
@@ -195,50 +199,82 @@ function renderLegend() {
 }
 
 // ---- State ------------------------------------------------------------------------
-const state = { frame: 0, colour: "dir", base: "lat", exag: 2000, playing: false };
 const $ = id => document.getElementById(id);
+// exag: map bar height = height (m) x exag, so at the default 2000, 1 m of tide draws
+// as a 2 km column. Read from the slider so the HTML value="..." is the only default.
+const state = { frame: 0, colour: "dir", base: "lat", exag: +$("exag").value, playing: false };
 const slider = $("slider");
 slider.max = NF - 1;
 
+// Distance between bars, m (rounded: chainage_km * 1000 can carry float noise).
+const SPACING_M = Math.round((P.chainage_km[1] - P.chainage_km[0]) * 1000);
+
+// iso is "YYYY-MM-DDTHH:MM", naive AEST, as written by build_payload() in river_tides.py.
+// Only the weekday/date come from Date (parsed as browser-local, which keeps the same
+// calendar day); the HH:MM is taken from the string so it always shows AEST as written.
 function fmtTime(iso) {
-  const d = new Date(iso + ":00");            // naive local AEST, displayed as written
+  const d = new Date(iso + ":00");
   return d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }) + " " + iso.slice(11, 16);
 }
 $("subtitle").textContent = `Predicted, ${fmtTime(DATA.times[0])} to ${fmtTime(DATA.times[NF - 1])} AEST, `
-  + `${NF} frames every ${DATA.meta.step_min} min, bars every ${(P.chainage_km[1] - P.chainage_km[0]) * 1000} m`;
+  + `${NF} frames every ${DATA.meta.step_min} min, bars every ${SPACING_M} m`;
 
 // ---- Map + deck.gl ----------------------------------------------------------------
+// If the map can't start (no WebGL, or the libraries didn't load), say so in the map
+// area and carry on: the profile, slider and controls don't need the map.
+const mapEl = $("map");
+function showNoMap(err) {
+  console.error("3D map unavailable:", err);
+  const msg = document.createElement("p");
+  msg.style.cssText = "position:absolute;inset:auto 16px 16px 16px;margin:0;padding:8px 12px;z-index:3;"
+    + "background:var(--panel);border:1px solid var(--line);border-radius:4px;color:var(--muted)";
+  msg.textContent = "The 3D map couldn't start in this browser (it needs WebGL and an internet "
+    + "connection). The profile and controls below still work.";
+  mapEl.appendChild(msg);
+}
+
 const STYLES = [
   "https://tiles.openfreemap.org/styles/positron",                       // default, no key
   "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",      // fallback
 ];
-const map = new maplibregl.Map({
-  container: "map", style: STYLES[0],
-  center: [152.975, -27.5], zoom: 10.7, pitch: 55, bearing: -15, maxPitch: 75,
-});
-map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
-let styleFellBack = false;
-map.on("error", e => {
-  // If the default style itself fails to load, switch once to the fallback.
-  if (!styleFellBack && !map.isStyleLoaded()) { styleFellBack = true; map.setStyle(STYLES[1]); }
-});
-
-const idx = Array.from({ length: NP }, (_, i) => i);
+let map = null;
+try {
+  // Opening view picked by eye to frame Brisbane Bar -> Kholo Creek, tilted and turned
+  // slightly so the bars stand up in front of the viewer. Not calculated from the data.
+  map = new maplibregl.Map({
+    container: "map", style: STYLES[0],
+    center: [152.975, -27.5], zoom: 10.7, pitch: 55, bearing: -15, maxPitch: 75,
+  });
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+  let styleFellBack = false;
+  map.on("error", e => {
+    // Switch once to the fallback style if an error arrives before any style has loaded.
+    // Approximate: that is usually the style itself failing, but could be another early error.
+    if (!styleFellBack && !map.isStyleLoaded()) { styleFellBack = true; map.setStyle(STYLES[1]); }
+  });
+} catch (err) {
+  map = null;
+  showNoMap(err);
+}
 
 // ---- Station callouts (screen space) -----------------------------------------------
 // A marker on the river at each station, with the label hanging straight DOWN the screen
 // on a leader line. Bars grow up the screen, so down is always in front of them, at any
 // rotation or tilt. Labels that would overlap are pushed to the next, longer drop.
 // Drawn as an HTML/SVG overlay and re-laid-out whenever the map moves.
+// Placement is greedy, left to right across the screen: each label takes the shortest
+// leader in DROPS whose box doesn't overlap a label already placed (else the longest).
+// Only built when the map exists.
 const DROPS = [34, 58, 82, 106, 130];         // leader lengths to try, px
-const mapEl = document.getElementById("map");
+const EDGE_PX = 50;                           // show stations up to this far off-screen
+const GAP_PX = 3;                             // horizontal clearance between labels
 const calloutLayer = document.createElement("div");
 calloutLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:2;overflow:hidden";
 const svgNS = "http://www.w3.org/2000/svg", leaderSvg = document.createElementNS(svgNS, "svg");
 leaderSvg.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
 calloutLayer.appendChild(leaderSvg);
-mapEl.appendChild(calloutLayer);
-const callouts = DATA.stations.map(s => {
+if (map) mapEl.appendChild(calloutLayer);
+const callouts = !map ? [] : DATA.stations.map(s => {
   const line = document.createElementNS(svgNS, "line");
   line.setAttribute("stroke", "rgba(29,35,41,.7)"); line.setAttribute("stroke-width", "1.2");
   const dot = document.createElementNS(svgNS, "circle");
@@ -260,7 +296,8 @@ function layoutCallouts() {
     return { c, x: p.x, y: p.y };
   }).sort((a, b) => a.x - b.x);
   for (const it of items) {
-    const { c, x, y } = it, show = x > -50 && x < W + 50 && y > -50 && y < Hm + 50;
+    const { c, x, y } = it;
+    const show = x > -EDGE_PX && x < W + EDGE_PX && y > -EDGE_PX && y < Hm + EDGE_PX;
     for (const el of [c.line, c.dot]) el.style.display = show ? "" : "none";
     c.label.style.display = show ? "" : "none";
     if (!show) continue;
@@ -268,36 +305,57 @@ function layoutCallouts() {
     const left = Math.max(2, Math.min(W - c.w - 2, x - c.w / 2));
     let drop = DROPS[DROPS.length - 1];
     for (const d of DROPS) {
-      const box = [left - 3, y + d, left + c.w + 3, y + d + c.h];
+      const box = [left - GAP_PX, y + d, left + c.w + GAP_PX, y + d + c.h];
       if (!placed.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) { drop = d; break; }
     }
-    placed.push([left - 3, y + drop, left + c.w + 3, y + drop + c.h]);
+    placed.push([left - GAP_PX, y + drop, left + c.w + GAP_PX, y + drop + c.h]);
     c.line.setAttribute("x1", x); c.line.setAttribute("y1", y);
     c.line.setAttribute("x2", x); c.line.setAttribute("y2", y + drop);
     c.dot.setAttribute("cx", x); c.dot.setAttribute("cy", y);
     c.label.style.left = left + "px"; c.label.style.top = (y + drop) + "px";
   }
 }
-map.on("render", layoutCallouts);
-map.on("load", layoutCallouts);
+if (map) {
+  map.on("render", layoutCallouts);
+  map.on("load", layoutCallouts);
+}
+
+// ---- Bars (deck.gl) -----------------------------------------------------------------
+// deck.gl data: one item per model point; each accessor gets the point index i.
+const idx = Array.from({ length: NP }, (_, i) => i);
+// Bar radius, m: 0.34 x spacing, so bars are 68 % of the spacing wide and never
+// overlap (170 m at the default 500 m spacing).
+const BAR_RADIUS_M = 0.34 * SPACING_M;
 function layers() {
   const base = BASES[state.base], colourFn = COLOURS[state.colour], f = state.frame;
   return [
     new deck.ColumnLayer({
-      id: "bars", data: idx, diskResolution: 12, radius: 170, extruded: true, pickable: true,
+      // diskResolution 12: each column is a 12-sided prism (round enough, cheap to draw).
+      id: "bars", data: idx, diskResolution: 12, radius: BAR_RADIUS_M, extruded: true, pickable: true,
       getPosition: i => [P.lon[i], P.lat[i]],
       getElevation: i => (base.f(f, i) - base.floor) * state.exag,
       getFillColor: i => colourFn(f, i),
+      // deck.gl only re-runs an accessor when a value in its trigger list changes, so
+      // each list names everything that accessor depends on.
       updateTriggers: { getElevation: [f, state.base, state.exag], getFillColor: [f, state.colour] },
-      transitions: { getElevation: 120 },
+      transitions: { getElevation: 120 },     // ms; smooths the height between frames
     }),
   ];
 }
-const overlay = new deck.MapboxOverlay({
-  interleaved: false, layers: layers(),
-  getTooltip: ({ index, layer }) => layer && layer.id === "bars" && index >= 0 ? { text: tipText(state.frame, index) } : null,
-});
-map.addControl(overlay);
+// interleaved: false = deck.gl draws the bars on its own canvas above the map.
+let overlay = null;
+if (map) {
+  try {
+    overlay = new deck.MapboxOverlay({
+      interleaved: false, layers: layers(),
+      getTooltip: ({ index, layer }) => layer && layer.id === "bars" && index >= 0 ? { text: tipText(state.frame, index) } : null,
+    });
+    map.addControl(overlay);
+  } catch (err) {
+    overlay = null;
+    showNoMap(err);
+  }
+}
 
 function tipText(f, p) {
   return `km ${P.chainage_km[p].toFixed(1)}  (lag ${P.lag_min[p].toFixed(0)} min, ratio ${P.ratio[p].toFixed(2)})\n`
@@ -386,7 +444,7 @@ cv.addEventListener("mouseleave", () => { ptip.style.display = "none"; });
 function update() {
   slider.value = state.frame;
   $("clock").textContent = fmtTime(DATA.times[state.frame]) + " AEST";
-  overlay.setProps({ layers: layers() });
+  if (overlay) overlay.setProps({ layers: layers() });
   drawProfile();
 }
 slider.addEventListener("input", () => { state.frame = +slider.value; update(); });
