@@ -25,7 +25,7 @@
   #controls label { display:flex; gap:6px; align-items:center; color:var(--muted); font-size:12px; }
   #controls select, #controls button { font:inherit; }
   #time { flex: 1 1 260px; display:flex; gap:8px; align-items:center; }
-  #time input { flex:1; }
+  #time input { flex:1; min-width:0; }  /* min-width:0 lets the slider shrink on narrow screens */
   #clock { font-variant-numeric: tabular-nums; min-width: 15ch; font-weight:600; }
   #play { width: 5.5em; }
   #legend { display:flex; gap:10px; align-items:center; font-size:12px; color:var(--muted); }
@@ -157,10 +157,19 @@ const BASES = {
 //           here, so they never point down (e.g. "relative to MSL", or the below-LAT
 //           dips upstream at big springs).
 //   max   = the highest value; with floor it sets the profile's y axis.
+//   envLo[p], envHi[p] = lowest and highest value at point p: the profile's envelope band.
 for (const b of Object.values(BASES)) {
-  let lo = 0, hi = -Infinity;
-  for (let f = 0; f < NF; f++) for (let p = 0; p < NP; p++) { const v = b.f(f, p); lo = Math.min(lo, v); hi = Math.max(hi, v); }
-  b.floor = lo; b.max = hi;
+  b.envLo = new Float64Array(NP).fill(Infinity);
+  b.envHi = new Float64Array(NP).fill(-Infinity);
+  for (let f = 0; f < NF; f++) {
+    for (let p = 0; p < NP; p++) {
+      const v = b.f(f, p);
+      b.envLo[p] = Math.min(b.envLo[p], v);
+      b.envHi[p] = Math.max(b.envHi[p], v);
+    }
+  }
+  b.floor = Math.min(0, ...b.envLo);
+  b.max = Math.max(...b.envHi);
 }
 
 // ---- Colours ----------------------------------------------------------------------
@@ -365,8 +374,25 @@ function tipText(f, p) {
 
 // ---- Profile (canvas) --------------------------------------------------------------
 const cv = $("profile"), ctx = cv.getContext("2d"), ptip = $("ptip");
-const PAD = { l: 64, r: 16, t: 14, b: 58 };
+const FONT = "11px system-ui, sans-serif";
 const KM_MAX = P.chainage_km[NP - 1];
+
+// Station names under the x axis are drawn tilted LABEL_ANGLE radians (~34 deg), hanging
+// down-left from their tick, with the text starting LABEL_DROP px below the axis.
+// Names closer than MIN_LABEL_GAP_PX to the last one drawn are skipped (narrow screens).
+// 20 px ~ text height / sin(LABEL_ANGLE): closer than that, tilted names overlap.
+const LABEL_ANGLE = 0.6, LABEL_DROP = 18, MIN_LABEL_GAP_PX = 20;
+
+// Margins around the plot area, px: room for the y labels (l), the "lag reversed"
+// note (t) and the km numbers plus tilted station names (b). b is sized from the
+// longest name, so names never run off the bottom of the canvas.
+ctx.font = FONT;
+const NAME_W = Math.max(...DATA.stations.map(s => ctx.measureText(s.short).width));
+const PAD = {
+  l: 64, r: 16, t: 14,
+  b: Math.ceil(LABEL_DROP + NAME_W * Math.sin(LABEL_ANGLE) + 8 * Math.cos(LABEL_ANGLE)) + 6,
+};
+
 function sizeCanvas() {
   const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
   cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
@@ -375,11 +401,12 @@ function sizeCanvas() {
 function drawProfile() {
   const r = cv.getBoundingClientRect(), W = r.width, Ht = r.height;
   const base = BASES[state.base], f = state.frame, colourFn = COLOURS[state.colour];
+  // y axis: from floor to max, rounded outwards to the nearest 0.5 m (the gridline step).
   const yLo = Math.floor(base.floor * 2) / 2, yHi = Math.ceil(base.max * 2) / 2;
   const X = km => PAD.l + (km / KM_MAX) * (W - PAD.l - PAD.r);
   const Y = v => PAD.t + (1 - (v - yLo) / (yHi - yLo)) * (Ht - PAD.t - PAD.b);
   ctx.clearRect(0, 0, W, Ht);
-  ctx.font = "11px system-ui, sans-serif";
+  ctx.font = FONT;              // set every draw: resizing the canvas resets the context
 
   // Lag-reversed reach
   ctx.fillStyle = "rgba(230,160,40,.12)";
@@ -398,13 +425,19 @@ function drawProfile() {
   ctx.save(); ctx.translate(14, (PAD.t + Ht - PAD.b) / 2); ctx.rotate(-Math.PI / 2);
   ctx.textAlign = "center"; ctx.fillText(base.label, 0, 0); ctx.restore();
 
-  // Envelope over the window (highest and lowest value) at each point
+  // Envelope over the window: a band from each point's lowest to highest value
+  // (precomputed per baseline). Along the top left to right, back along the bottom.
   ctx.fillStyle = "rgba(31,111,178,.08)"; ctx.beginPath();
-  for (let p = 0; p < NP; p++) { let hi = -Infinity; for (let fr = 0; fr < NF; fr++) hi = Math.max(hi, base.f(fr, p)); p ? ctx.lineTo(X(P.chainage_km[p]), Y(hi)) : ctx.moveTo(X(P.chainage_km[p]), Y(hi)); }
-  for (let p = NP - 1; p >= 0; p--) { let lo = Infinity; for (let fr = 0; fr < NF; fr++) lo = Math.min(lo, base.f(fr, p)); ctx.lineTo(X(P.chainage_km[p]), Y(lo)); }
+  for (let p = 0; p < NP; p++) {
+    const x = X(P.chainage_km[p]), y = Y(base.envHi[p]);
+    p ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  for (let p = NP - 1; p >= 0; p--) ctx.lineTo(X(P.chainage_km[p]), Y(base.envLo[p]));
   ctx.closePath(); ctx.fill();
 
-  // Current frame: one bar per point from the zero line, same colours as the map
+  // Current frame: one bar per point from the zero line, same colours as the map.
+  // Each bar is 80 % of the point spacing wide (at least 1 px), and at least 1 px tall
+  // ("|| 1") so a point at exactly zero still shows its colour.
   const bw = Math.max(1, (X(P.chainage_km[1]) - X(0)) * 0.8);
   for (let p = 0; p < NP; p++) {
     const v = base.f(f, p), x = X(P.chainage_km[p]);
@@ -420,27 +453,37 @@ function drawProfile() {
   ctx.fillStyle = "#5d6873"; ctx.strokeStyle = "#9aa4ad"; ctx.lineWidth = 1; ctx.textAlign = "center";
   for (let km = 0; km <= KM_MAX; km += 10) ctx.fillText(km, X(km), Ht - PAD.b + 12);
   ctx.textAlign = "left"; ctx.fillText("km", X(KM_MAX) - 14, Ht - PAD.b + 12);
-  // Station names, angled so neighbours (Tennyson/Indooroopilly, Moggill/Kholo) don't collide
+  // Station names, tilted so close neighbours (Tennyson/Indooroopilly, Moggill/Kholo)
+  // don't collide. Every station gets a tick; a name too close to the previous one
+  // drawn is skipped (only happens on narrow screens).
+  let lastNameX = -Infinity;
   for (const s of DATA.stations) {
     const x = X(s.chainage_km);
     ctx.beginPath(); ctx.moveTo(x, Ht - PAD.b); ctx.lineTo(x, Ht - PAD.b + 3); ctx.stroke();
-    ctx.save(); ctx.translate(x, Ht - PAD.b + 18); ctx.rotate(-0.6); ctx.textAlign = "right";
+    if (x - lastNameX < MIN_LABEL_GAP_PX) continue;
+    lastNameX = x;
+    ctx.save(); ctx.translate(x, Ht - PAD.b + LABEL_DROP); ctx.rotate(-LABEL_ANGLE); ctx.textAlign = "right";
     ctx.fillText(s.short, 0, 8); ctx.restore();
   }
 }
-cv.addEventListener("mousemove", e => {
+// Tooltip for the point nearest the pointer. Pointer events cover mouse, touch and pen;
+// pointerdown makes a tap on a touch screen show it too.
+function showProfileTip(e) {
   const r = cv.getBoundingClientRect(), x = e.clientX - r.left;
   const km = (x - PAD.l) / (r.width - PAD.l - PAD.r) * KM_MAX;
   if (km < 0 || km > KM_MAX) { ptip.style.display = "none"; return; }
-  let p = 0, best = Infinity;
+  let p = 0, best = Infinity;               // nearest point (a plain search; NP is small)
   for (let i = 0; i < NP; i++) { const d = Math.abs(P.chainage_km[i] - km); if (d < best) { best = d; p = i; } }
   ptip.textContent = tipText(state.frame, p).replace(/\n/g, "  ·  ");
   ptip.style.display = "block";
-  ptip.style.left = Math.min(x + 12, r.width - ptip.offsetWidth - 4) + "px"; ptip.style.top = "6px";
-});
-cv.addEventListener("mouseleave", () => { ptip.style.display = "none"; });
+  ptip.style.left = Math.max(4, Math.min(x + 12, r.width - ptip.offsetWidth - 4)) + "px"; ptip.style.top = "6px";
+}
+cv.addEventListener("pointermove", showProfileTip);
+cv.addEventListener("pointerdown", showProfileTip);
+cv.addEventListener("pointerleave", () => { ptip.style.display = "none"; });
 
 // ---- Wiring -------------------------------------------------------------------------
+// Every control changes state, then calls update(), which redraws for state.frame.
 function update() {
   slider.value = state.frame;
   $("clock").textContent = fmtTime(DATA.times[state.frame]) + " AEST";
@@ -452,6 +495,8 @@ $("colour").addEventListener("change", e => { state.colour = e.target.value; ren
 $("base").addEventListener("change", e => { state.base = e.target.value; update(); });
 $("exag").addEventListener("input", e => { state.exag = +e.target.value; update(); });
 
+// Playback: the Speed values (2, 5, 12) are frames per second. After the last frame it
+// loops back to the first. Changing speed while playing restarts the timer.
 let timer = null;
 function setPlaying(on) {
   state.playing = on; $("play").textContent = on ? "❚❚ Pause" : "▶ Play";
@@ -460,9 +505,15 @@ function setPlaying(on) {
 }
 $("play").addEventListener("click", () => setPlaying(!state.playing));
 $("speed").addEventListener("change", () => { if (state.playing) setPlaying(true); });
+// Keys: Space plays/pauses; Left/Right step one frame. Ignored in the drop-downs, which
+// use those keys themselves.
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "SELECT") return;
+  // preventDefault: stop Space scrolling the page or also "clicking" a focused button.
   if (e.key === " ") { e.preventDefault(); setPlaying(!state.playing); }
+  // A focused slider already moves itself on arrow keys (and fires "input"), so
+  // stepping here too would skip two frames.
+  if (e.target === slider) return;
   if (e.key === "ArrowRight") { state.frame = Math.min(NF - 1, state.frame + 1); update(); }
   if (e.key === "ArrowLeft") { state.frame = Math.max(0, state.frame - 1); update(); }
 });
