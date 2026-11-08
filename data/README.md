@@ -50,6 +50,21 @@ None. The file is stored as downloaded, apart from the rename. All parsing happe
 
 ---
 
+## `bar_2027_10min.csv`
+
+Same source, licence, attribution and format as `bar_2026_10min.csv` above, for 1 January to 31 December 2027.
+
+- **How it was made:** `python fetch_bar.py --year 2027`, on 2026-11-08, from the data.qld.gov.au datastore API (resource `458352c5-4038-4f55-a489-9ffa0e25af97`, created 2026-09-03). That day the resource's download link returned a web page instead of the CSV, so the API was used instead.
+- **Processing:** the API table had 72,620 rows. Rows from 14 August to 31 December 2027 were there twice, with identical values. `fetch_bar.py` dropped the 20,060 exact duplicates and renumbered `_id`. Nothing else was changed.
+- **Check:** `fetch_bar.py --year 2026` rebuilds the committed 2026 file byte for byte (checked 2026-11-08).
+- 52,560 rows, every step exactly 10 minutes. `Ind` is `9` on every row. `Reading` ranges from 0.197 to 2.809 m.
+- **Mean reading:** 1.351 m, matching the MSL MSQ says it used for the 2027 predictions. The 2026 file averages 1.347 m. The model's `MSL_Bar` stays at the tidal planes' 1.32 m (see `stations.csv`). The difference shifts upriver heights by about 1 cm at most.
+- SHA-256: `1816a88b27b9027d9fedbac32f85093cf4a3451766e4f5dd3a0fd11a4383fe83`. Size 1,618,284 bytes.
+
+`river_tides.py` reads every `data/bar_YYYY_10min.csv` by default and joins them, so a window can cross New Year.
+
+---
+
 ## `stations.csv`
 
 **Source**
@@ -57,6 +72,7 @@ None. The file is stored as downloaded, apart from the rename. All parsing happe
 - *Semidiurnal Tidal Planes — 2026*, Maritime Safety Queensland. Heights are above Queensland Port Datum, LAT (1992).
   https://www.msq.qld.gov.au/_/media/tmronline/msqinternet/msqfiles/home/tides/tidal-planes/2026-semidiurnal-tidal-planes.pdf
 - MSQ tidal planes page: https://www.msq.qld.gov.au/tides/tidal-planes
+- **2027 check (2026-11-08):** the Brisbane River rows of *2027 Semidiurnal and diurnal tidal planes* (Brisbane Bar to Kholo Creek, 13 rows) are identical to 2026. That includes the Indooroopilly / Seventeen Mile Rocks lag reversal, so no change was needed.
 - Retrieved: `TODO`. The PDF was attached to a Claude session on 2026-11-07, so retrieval was on or before that date.
 - Licence: Creative Commons Attribution 4.0 (CC BY 4.0), by default. Checked 2026-11-08: MSQ refers to the Queensland Government *Open Data, Information Sharing, Access and Use Policy*, which makes CC BY 4.0 the default licence for government data:
   https://www.forgov.qld.gov.au/information-technology/queensland-government-enterprise-architecture-qgea/qgea-directions-and-guidance/qgea-policies-standards-and-guidelines/open-data-information-sharing-access-and-use-policy
@@ -158,6 +174,6 @@ None. Stored exactly as returned. All processing happens in `build_centreline.py
 
 When a new year's file is added, or `stations.csv` changes:
 
-1. Add the file and update the relevant section above: source URL, retrieval date, checksum, and any processing.
+1. For a new year of Bar predictions, once MSQ publishes it (2027 appeared in September 2026), run `python fetch_bar.py --year YYYY`. Check the new tidal planes PDF against `stations.csv`. Then add the file and update the relevant section above: source URL, retrieval date, checksum, and any processing.
 2. Commit the data and this README together, with a message saying what changed.
 3. If the change alters the output, bump the minor version tag.

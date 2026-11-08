@@ -37,7 +37,7 @@ Useful options (`--help` lists them all):
 
 - `--start 2026-11-08T06:00`: start of the window, local AEST.
 - `--hours 12`: window length (default 24).
-- `--csv FILE`: a different Brisbane Bar prediction file. The committed file covers 2026 only.
+- `--csv FILE ...`: different Brisbane Bar prediction file(s). By default it uses every `data/bar_YYYY_10min.csv`; 2026 and 2027 are committed. `fetch_bar.py --year YYYY` fetches another year.
 - `--json FILE`: also save the page data as JSON.
 - `--stamp`: show when the page was built (AEST). The hosted page uses it; it's off by default so repeat runs give identical files.
 
@@ -71,4 +71,4 @@ Built with help from Claude (Anthropic), using Claude Code.
 
 ## Licence
 
-The code (`river_tides.py`, `build_centreline.py`, `collect_gauges.py` and `web/`) is under the MIT licence; see [LICENSE](LICENSE). The files in `data/` keep their original CC BY 4.0 licences, as listed above.
+The code (`river_tides.py`, `build_centreline.py`, `collect_gauges.py`, `fetch_bar.py` and `web/`) is under the MIT licence; see [LICENSE](LICENSE). The files in `data/` keep their original CC BY 4.0 licences, as listed above.

@@ -21,8 +21,8 @@ Excludes freshwater flow, wind, surge and dam releases. Anything derived from
 the heights (rising/falling, rate, slope) is a direction proxy, not a current.
 
 Usage:
-  python river_tides.py --start 2026-11-08            # uses data/bar_2026_10min.csv
-  python river_tides.py --csv OTHER.csv --start ...   # a different Bar file
+  python river_tides.py --start 2026-11-08            # uses every data/bar_YYYY_10min.csv
+  python river_tides.py --csv OTHER.csv --start ...   # different Bar file(s)
   python river_tides.py --start ... --json output/check.json   # also dump the data
   python river_tides.py --hours 48 --stamp            # as the hosted page is built
 
@@ -46,6 +46,16 @@ BRISBANE = "Australia/Brisbane"
 
 # --- Inputs ----------------------------------------------------------------------
 
+def load_bars(paths):
+    """Brisbane Bar predictions from one or more yearly files, joined in time order.
+
+    The files must join without a gap or overlap (checked after joining), so a
+    window can run across New Year.
+    """
+    return check_steps(pd.concat([load_bar(p) for p in paths]).sort_index(),
+                       ", ".join(str(p) for p in paths))
+
+
 def load_bar(path):
     """Brisbane Bar predictions as a time-indexed Series (metres above LAT).
 
@@ -62,15 +72,18 @@ def load_bar(path):
     df.columns = [c.strip().lower() for c in df.columns]
     stamp = df["date"].astype(str).str.strip() + " " + df["time"].astype(str).str.strip()
     t = pd.to_datetime(stamp, dayfirst=True)       # dayfirst: Australian DD/MM/YYYY
-    # errors="coerce" turns unreadable values into NaN; dropna removes them, and the
-    # gap check below then reports the hole they leave.
+    # errors="coerce" turns unreadable values into NaN; dropna removes them, and
+    # check_steps() then reports the hole they leave.
     s = pd.Series(pd.to_numeric(df["reading"], errors="coerce").values, index=t)
-    s = s.dropna().sort_index()
+    return check_steps(s.dropna().sort_index(), path)
 
+
+def check_steps(s, label):
+    """Return s unchanged if every step is exactly 10 minutes; otherwise stop."""
     steps = s.index.to_series().diff().dropna()
     bad = steps[steps != pd.Timedelta(minutes=10)]
     if not bad.empty:
-        raise SystemExit(f"{path}: {len(bad)} step(s) are not 10 min, first ending at "
+        raise SystemExit(f"{label}: {len(bad)} step(s) are not 10 min, first ending at "
                          f"{bad.index[0]} ({bad.iloc[0]}). Missing or duplicate readings?")
     return s
 
@@ -178,7 +191,8 @@ def heights(bar, frames, pts, bar_msl):
             why.append(f"ends {frames[-1]:%Y-%m-%d %H:%M} (the last frame is included), "
                        f"but the CSV ends {bar.index[-1]:%Y-%m-%d %H:%M}")
         raise SystemExit("Window " + "; and ".join(why or ["is not covered by the Bar data"])
-                         + ". Adjust --start/--hours or use another year's CSV.")
+                         + ". Adjust --start/--hours, or add that year's CSV "
+                           "(fetch_bar.py --year YYYY).")
     return pts.msl_m.values[None, :] + pts.ratio.values[None, :] * anomaly
 
 
@@ -266,8 +280,10 @@ def to_json(payload):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--csv", default=str(DATA / "bar_2026_10min.csv"),
-                    help="Brisbane Bar 10-min prediction CSV (default: the 2026 file in data/)")
+    ap.add_argument("--csv", nargs="+",
+                    default=sorted(str(p) for p in DATA.glob("bar_*_10min.csv")),
+                    help="Brisbane Bar 10-min prediction CSV file(s), joined in time order "
+                         "(default: every data/bar_YYYY_10min.csv, so windows can cross New Year)")
     ap.add_argument("--stations", default=str(DATA / "stations.csv"),
                     help="secondary-port stations: chainage, lag, ratio, MSL (default: data/)")
     ap.add_argument("--centreline", default=str(DATA / "centreline.csv"),
@@ -308,14 +324,14 @@ def main():
     # MSL_Bar in the model: the Bar's row (chainage 0) of stations.csv, 1.32 m.
     bar_msl = float(st.loc[st.chainage_km == 0, "msl_m"].iloc[0])
 
-    full = load_bar(args.csv)
+    full = load_bars(args.csv)
     # Trim to the window with a 1-day margin each side, which is ample for the largest
     # lag (160 min, Kholo). heights() checks the coverage exactly.
     bar = full[start - pd.Timedelta(days=1): frames[-1] + pd.Timedelta(days=1)]
     if bar.empty:
         raise SystemExit(f"No Bar data near the window: the CSV covers "
                          f"{full.index[0]:%Y-%m-%d %H:%M} to {full.index[-1]:%Y-%m-%d %H:%M}. "
-                         "Check --start, or use another year's CSV.")
+                         "Check --start, or add that year's CSV (fetch_bar.py --year YYYY).")
 
     pts = sample_centreline(args.centreline, args.spacing_km, st.chainage_km.max())
     pts = add_corrections(pts, st)
