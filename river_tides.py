@@ -113,8 +113,14 @@ def sample_centreline(path, step_km, end_km):
 def add_corrections(pts, st):
     """Interpolate lag, ratio and MSL from the stations onto each point.
 
+    Adds the columns to pts itself (and returns it, for readability at the call site).
+    np.interp needs st.chainage_km strictly increasing; load_stations guarantees it.
+
     ASSUMPTION: each varies linearly along the river between stations.
     Points beyond the last station would take its values; sample_centreline stops there.
+    NOTE: this is where the published lag reversal enters the model. Between
+    Indooroopilly (km 37.6, 92.5 min) and Seventeen Mile Rocks (km 44.7, 80 min) the
+    interpolated lag falls going upstream (see data/README.md, Known limitations).
     """
     for col in ["lag_min", "ratio", "msl_m"]:
         pts[col] = np.interp(pts.chainage_km, st.chainage_km, st[col])
@@ -127,20 +133,41 @@ def heights(bar, frames, pts, bar_msl):
     For each point, look up the Bar lag minutes earlier (linear interpolation between
     10-minute samples), take its departure from the Bar's MSL, scale it by the
     point's ratio, and add the point's own MSL.
+
+    Linear interpolation between 10-minute samples is accurate to under 1 mm here
+    (error <= A*w^2*dt^2/8 with amplitude A ~1 m, M2 w = 0.51 rad/h, dt = 1/6 h),
+    which is below the mm rounding of the output.
     """
+    # np.interp works on plain numbers, not datetimes, so express every time as
+    # seconds since the first Bar reading.
     t0 = bar.index[0]
     bar_sec = (bar.index - t0).total_seconds().values
     frame_sec = (frames - t0).total_seconds().values
     anomaly_bar = bar.values - bar_msl
 
     # want[f, p] = time (s) at which the Bar must be read for frame f at point p.
+    # MINUS the lag: the tide reaches upstream later, so a point now shows what the
+    # Bar showed lag minutes ago.
     # The [:, None] / [None, :] pairs make numpy build the full grid in one step.
     want = frame_sec[:, None] - pts.lag_min.values[None, :] * 60
-    a = np.interp(want.ravel(), bar_sec, anomaly_bar, left=np.nan, right=np.nan).reshape(want.shape)
-    if np.isnan(a).any():
-        raise SystemExit("Bar data does not cover the window plus the largest lag - "
-                         "check --start against the CSV.")
-    return pts.msl_m.values[None, :] + pts.ratio.values[None, :] * a
+    # left/right=NaN: a time outside the Bar data gives NaN instead of the edge value.
+    anomaly = np.interp(want.ravel(), bar_sec, anomaly_bar,
+                        left=np.nan, right=np.nan).reshape(want.shape)
+    if np.isnan(anomaly).any():
+        # Say which end is short. main() has already trimmed bar to the window +/- 1 day,
+        # so whichever edge falls inside that margin is the edge of the CSV itself.
+        need_from = frames[0] - pd.Timedelta(minutes=float(pts.lag_min.max()))
+        why = []
+        if need_from < bar.index[0]:
+            why.append(f"needs Bar data from {need_from:%Y-%m-%d %H:%M} (upstream points "
+                       f"read up to {pts.lag_min.max():.0f} min earlier), but the CSV "
+                       f"starts {bar.index[0]:%Y-%m-%d %H:%M}")
+        if frames[-1] > bar.index[-1]:
+            why.append(f"ends {frames[-1]:%Y-%m-%d %H:%M} (the last frame is included), "
+                       f"but the CSV ends {bar.index[-1]:%Y-%m-%d %H:%M}")
+        raise SystemExit("Window " + "; and ".join(why or ["is not covered by the Bar data"])
+                         + ". Adjust --start/--hours or use another year's CSV.")
+    return pts.msl_m.values[None, :] + pts.ratio.values[None, :] * anomaly
 
 
 # --- Output ----------------------------------------------------------------------
