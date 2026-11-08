@@ -507,7 +507,9 @@ function drawProfile() {
   const base = BASES[state.base], f = state.frame, colourFn = COLOURS[state.colour];
   // y axis: from floor to max, rounded outwards to the nearest 0.5 m (the gridline step).
   const yLo = Math.floor(base.floor * 2) / 2, yHi = Math.ceil(base.max * 2) / 2;
-  const X = km => PAD.l + (km / KM_MAX) * (W - PAD.l - PAD.r);
+  // km runs RIGHT TO LEFT: Brisbane Bar (km 0) on the right, upstream on the left,
+  // matching the map, where the river mouth is east (right) and upstream is west.
+  const X = km => PAD.l + (1 - km / KM_MAX) * (W - PAD.l - PAD.r);
   const Y = v => PAD.t + (1 - (v - yLo) / (yHi - yLo)) * (Ht - PAD.t - PAD.b);
   ctx.clearRect(0, 0, W, Ht);
   ctx.font = FONT;              // set every draw: resizing the canvas resets the context
@@ -542,7 +544,7 @@ function drawProfile() {
   // Current frame: one bar per point from the zero line, same colours as the map.
   // Each bar is 80 % of the point spacing wide (at least 1 px), and at least 1 px tall
   // ("|| 1") so a point at exactly zero still shows its colour.
-  const bw = Math.max(1, (X(P.chainage_km[1]) - X(0)) * 0.8);
+  const bw = Math.max(1, Math.abs(X(P.chainage_km[1]) - X(0)) * 0.8);
   for (let p = 0; p < NP; p++) {
     const v = base.f(f, p), x = X(P.chainage_km[p]);
     ctx.fillStyle = css(colourFn(f, p));
@@ -555,13 +557,14 @@ function drawProfile() {
 
   // x axis: km ticks every 10 km above the station names
   ctx.fillStyle = "#5d6873"; ctx.strokeStyle = "#9aa4ad"; ctx.lineWidth = 1; ctx.textAlign = "center";
-  for (let km = 0; km <= KM_MAX; km += 10) ctx.fillText(km, X(km), Ht - PAD.b + 12);
-  ctx.textAlign = "left"; ctx.fillText("km", X(KM_MAX) - 14, Ht - PAD.b + 12);
+  for (let km = 10; km <= KM_MAX; km += 10) ctx.fillText(km, X(km), Ht - PAD.b + 12);
+  ctx.textAlign = "right"; ctx.fillText("0 km", X(0) + 4, Ht - PAD.b + 12);   // at the right edge
   // Station names, tilted so close neighbours (Tennyson/Indooroopilly, Moggill/Kholo)
   // don't collide. Every station gets a tick; a name too close to the previous one
   // drawn is skipped (only happens on narrow screens).
+  // Left to right across the screen (upstream first), so the skip rule below works.
   let lastNameX = -Infinity;
-  for (const s of DATA.stations) {
+  for (const s of [...DATA.stations].reverse()) {
     const x = X(s.chainage_km);
     ctx.beginPath(); ctx.moveTo(x, Ht - PAD.b); ctx.lineTo(x, Ht - PAD.b + 3); ctx.stroke();
     if (x - lastNameX < MIN_LABEL_GAP_PX) continue;
@@ -574,7 +577,7 @@ function drawProfile() {
 // pointerdown makes a tap on a touch screen show it too.
 function showProfileTip(e) {
   const r = cv.getBoundingClientRect(), x = e.clientX - r.left;
-  const km = (x - PAD.l) / (r.width - PAD.l - PAD.r) * KM_MAX;
+  const km = (1 - (x - PAD.l) / (r.width - PAD.l - PAD.r)) * KM_MAX;   // axis runs right to left
   if (km < 0 || km > KM_MAX) { ptip.style.display = "none"; return; }
   let p = 0, best = Infinity;               // nearest point (a plain search; NP is small)
   for (let i = 0; i < NP; i++) { const d = Math.abs(P.chainage_km[i] - km); if (d < best) { best = d; p = i; } }

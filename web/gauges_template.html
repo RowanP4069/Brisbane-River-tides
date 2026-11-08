@@ -412,7 +412,9 @@ function drawProfile() {
   if (!NF) return;
   const base = BASES[state.base], f = state.frame, colourFn = COLOURS[state.colour];
   const yLo = Math.floor(base.floor * 2) / 2, yHi = Math.ceil(base.max * 2) / 2;
-  const X = km => PAD.l + (km / KM_MAX) * (W - PAD.l - PAD.r);
+  // km runs RIGHT TO LEFT: Brisbane Bar (km 0) on the right, upstream on the left,
+  // matching the map, where the river mouth is east (right) and upstream is west.
+  const X = km => PAD.l + (1 - km / KM_MAX) * (W - PAD.l - PAD.r);
   const Y = v => PAD.t + (1 - (v - yLo) / (yHi - yLo)) * (Ht - PAD.t - PAD.b);
 
   // Gridlines and y labels
@@ -457,7 +459,7 @@ function drawProfile() {
   // (City Gauge and Port Office are only 200 m apart).
   ctx.fillStyle = "#1d2329"; ctx.textAlign = "center";
   const rowEnd = [-Infinity, -Infinity];
-  for (const G of GAUGES) {
+  for (const G of [...GAUGES].reverse()) {          // left to right across the screen
     const x = X(G.chainage_km), w = ctx.measureText(G.short).width;
     const row = rowEnd.findIndex(e => x - w / 2 > e + 4);
     if (row < 0) continue;
@@ -466,10 +468,11 @@ function drawProfile() {
   }
   // x axis: km and MSQ station names, as on the predictions page
   ctx.fillStyle = "#5d6873"; ctx.strokeStyle = "#9aa4ad"; ctx.lineWidth = 1; ctx.textAlign = "center";
-  for (let km = 0; km <= KM_MAX; km += 10) ctx.fillText(km, X(km), Ht - PAD.b + 12);
-  ctx.textAlign = "left"; ctx.fillText("km", X(KM_MAX) - 14, Ht - PAD.b + 12);
+  for (let km = 10; km <= KM_MAX; km += 10) ctx.fillText(km, X(km), Ht - PAD.b + 12);
+  ctx.textAlign = "right"; ctx.fillText("0 km", X(0) + 4, Ht - PAD.b + 12);   // at the right edge
+  // Left to right across the screen (upstream first), so the skip rule below works.
   let lastNameX = -Infinity;
-  for (const s of DATA.stations) {
+  for (const s of [...DATA.stations].reverse()) {
     const x = X(s.chainage_km);
     ctx.beginPath(); ctx.moveTo(x, Ht - PAD.b); ctx.lineTo(x, Ht - PAD.b + 3); ctx.stroke();
     if (x - lastNameX < MIN_LABEL_GAP_PX) continue;
@@ -481,7 +484,7 @@ function drawProfile() {
 function showProfileTip(e) {
   if (!NF) return;
   const r = cv.getBoundingClientRect(), x = e.clientX - r.left;
-  const km = (x - PAD.l) / (r.width - PAD.l - PAD.r) * KM_MAX;
+  const km = (1 - (x - PAD.l) / (r.width - PAD.l - PAD.r)) * KM_MAX;   // axis runs right to left
   let g = 0, best = Infinity;
   for (let i = 0; i < NG; i++) { const d = Math.abs(GAUGES[i].chainage_km - km); if (d < best) { best = d; g = i; } }
   if (km < 0 || km > KM_MAX) { ptip.style.display = "none"; return; }
