@@ -20,9 +20,9 @@ Excludes freshwater flow, wind, surge and dam releases. Anything derived from
 the heights (rising/falling, rate, slope) is a direction proxy, not a current.
 
 Usage:
-  python river_tides.py --csv data/bar_2026_10min.csv --start 2026-11-08
-  python river_tides.py --demo --start 2026-11-08      # synthetic Bar tide
-  python river_tides.py --csv ... --json output/check.json   # dump the data
+  python river_tides.py --start 2026-11-08            # uses data/bar_2026_10min.csv
+  python river_tides.py --csv OTHER.csv --start ...   # a different Bar file
+  python river_tides.py --start ... --json output/check.json   # also dump the data
 
 Sources: see data/README.md.
 """
@@ -52,18 +52,6 @@ def load_bar(path):
                        dayfirst=True)
     s = pd.Series(pd.to_numeric(df["reading"], errors="coerce").values, index=t)
     return s.dropna().sort_index()
-
-
-def demo_bar(start, hours):
-    """Crude synthetic Bar tide (M2+S2+K1+O1) around MSL 1.32 m. Pipeline testing only."""
-    # 1 day of padding either side, so lagged points always have data.
-    idx = pd.date_range(pd.Timestamp(start) - pd.Timedelta(days=1),
-                        pd.Timestamp(start) + pd.Timedelta(hours=hours) + pd.Timedelta(days=1),
-                        freq="10min")
-    h = (idx - idx[0]).total_seconds().values / 3600
-    y = 1.32 + 0.65*np.cos(2*np.pi*h/12.42) + 0.2*np.cos(2*np.pi*h/12.0 + 1) \
-        + 0.15*np.cos(2*np.pi*h/23.93) + 0.1*np.cos(2*np.pi*h/25.82)
-    return pd.Series(y, index=idx)
 
 
 def load_stations(path):
@@ -188,8 +176,8 @@ def build_payload(frames, pts, h, start, bar_msl, step_min, stations):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--csv", help="Brisbane Bar 10-min prediction CSV")
-    ap.add_argument("--demo", action="store_true", help="use a synthetic Bar tide")
+    ap.add_argument("--csv", default=str(DATA / "bar_2026_10min.csv"),
+                    help="Brisbane Bar 10-min prediction CSV (default: the 2026 file in data/)")
     ap.add_argument("--stations", default=str(DATA / "stations.csv"))
     ap.add_argument("--centreline", default=str(DATA / "centreline.csv"))
     ap.add_argument("--start", default=str(pd.Timestamp.now().date()),
@@ -201,8 +189,6 @@ def main():
     ap.add_argument("--template", default=str(Path(__file__).parent / "web" / "river_tides_template.html"))
     ap.add_argument("--json", help="also write the page data to this JSON file")
     a = ap.parse_args()
-    if not (a.csv or a.demo):
-        ap.error("give --csv PATH or --demo")
 
     start = pd.Timestamp(a.start)
     frames = pd.date_range(start, start + pd.Timedelta(hours=a.hours), freq=f"{a.step_min}min")
@@ -210,7 +196,7 @@ def main():
     st = load_stations(a.stations)
     bar_msl = float(st.loc[st.chainage_km == 0, "msl_m"].iloc[0])
 
-    bar = demo_bar(start, a.hours) if a.demo else load_bar(a.csv)
+    bar = load_bar(a.csv)
     # Keep 1 day either side: the largest lag (~3 h) needs Bar data before the start.
     bar = bar[start - pd.Timedelta(days=1): frames[-1] + pd.Timedelta(days=1)]
     if bar.empty:
