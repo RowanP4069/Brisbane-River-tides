@@ -58,7 +58,10 @@ None. The file is stored as downloaded, apart from the rename. All parsing happe
   https://www.msq.qld.gov.au/_/media/tmronline/msqinternet/msqfiles/home/tides/tidal-planes/2026-semidiurnal-tidal-planes.pdf
 - MSQ tidal planes page: https://www.msq.qld.gov.au/tides/tidal-planes
 - Retrieved: `TODO`. The PDF was attached to a Claude session on 2026-11-07, so retrieval was on or before that date.
-- Licence: `TODO`. Check the MSQ site copyright page.
+- Licence: Creative Commons Attribution 4.0 (CC BY 4.0), by default. Checked 2026-11-08: MSQ refers to the Queensland Government *Open Data, Information Sharing, Access and Use Policy*, which makes CC BY 4.0 the default licence for government data:
+  https://www.forgov.qld.gov.au/information-technology/queensland-government-enterprise-architecture-qgea/qgea-directions-and-guidance/qgea-policies-standards-and-guidelines/open-data-information-sharing-access-and-use-policy
+  MSQ's open data page (https://www.msq.qld.gov.au/tides/open-data) says tide data is published "as part of the Queensland Government's Open Data initiative". Neither the PDF nor the tidal planes page states a licence of its own, so this rests on the policy default.
+- Attribution: "Contains data from Maritime Safety Queensland, © State of Queensland (Department of Transport and Main Roads), licensed under CC BY 4.0."
 
 **Derivation**
 
@@ -116,7 +119,7 @@ This file is hand-built, not a copy of anything published, so record any change 
 
 **Licence**
 
-- Creative Commons Attribution 4.0 (CC BY 4.0), as shown on the data.qld.gov.au listing for the North East Coast drainage division subset. The ArcGIS service metadata says the dataset "has no use limitations". `TODO`: confirm the licence on the statewide resource page.
+- Creative Commons Attribution 4.0 (CC BY 4.0, https://creativecommons.org/licenses/by/4.0/). Confirmed 2026-11-08 on the dataset series page (https://www.data.qld.gov.au/dataset/hydrographic-features-queensland-series), which states this licence explicitly. Also shown on the listing for the North East Coast drainage division subset; the ArcGIS service metadata says the dataset "has no use limitations".
 - Attribution: "Contains data from Watercourse lines - Queensland, © State of Queensland (Department of Resources), licensed under CC BY 4.0."
 
 **Format**

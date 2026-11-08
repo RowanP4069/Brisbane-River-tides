@@ -242,25 +242,22 @@ function showNoMap(err) {
   mapEl.appendChild(msg);
 }
 
-const STYLES = [
-  "https://tiles.openfreemap.org/styles/positron",                       // default, no key
-  "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",      // fallback
-];
+// Basemap terms. OpenFreeMap (checked 2026-11-08, https://openfreemap.org): free, no
+// key, MIT; attribution is required and MapLibre adds it automatically. In a screenshot
+// or video, keep the attribution corner in view (or add "OpenFreeMap © OpenMapTiles
+// Data from OpenStreetMap").
+// One basemap only, so there is a single set of terms to follow. If it fails to load,
+// the map has no background but the bars, callouts and profile still work.
+const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 let map = null;
 try {
   // Opening view picked by eye to frame Brisbane Bar -> Kholo Creek, tilted and turned
   // slightly so the bars stand up in front of the viewer. Not calculated from the data.
   map = new maplibregl.Map({
-    container: "map", style: STYLES[0],
+    container: "map", style: MAP_STYLE,
     center: [152.975, -27.5], zoom: 10.7, pitch: 55, bearing: -15, maxPitch: 75,
   });
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
-  let styleFellBack = false;
-  map.on("error", e => {
-    // Switch once to the fallback style if an error arrives before any style has loaded.
-    // Approximate: that is usually the style itself failing, but could be another early error.
-    if (!styleFellBack && !map.isStyleLoaded()) { styleFellBack = true; map.setStyle(STYLES[1]); }
-  });
 } catch (err) {
   map = null;
   showNoMap(err);
