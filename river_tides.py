@@ -34,7 +34,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATA = Path(__file__).parent / "data"
+# Default paths are relative to this script, so it works from any current folder.
+HERE = Path(__file__).parent
+DATA = HERE / "data"
 
 
 # --- Inputs ----------------------------------------------------------------------
@@ -210,7 +212,8 @@ def build_payload(frames, pts, h, bar_msl, step_min, stations):
             "step_min": step_min,
             "timezone": "AEST (UTC+10)",
             "bar_msl_m": bar_msl,
-            "datum": "metres above each station's local LAT (Queensland Port Datum)",
+            "datum": "metres above each station's local LAT "
+                     "(Queensland Port Datum, assumed; see data/README.md)",
             "model": "MSL(x) + ratio(x) * (Bar(t - lag(x)) - MSL_Bar)",
         },
         # Naive AEST, no seconds. fmtTime() in the template appends ":00" to parse
@@ -240,40 +243,67 @@ def write_html(payload, template_path, out_path):
     if html.count(marker) != 1:
         raise SystemExit(f"Template must contain {marker} exactly once: {template_path}")
     # "</" is escaped so a stray "</script>" inside the data can never close the script tag.
-    data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
+    data = to_json(payload).replace("</", "<\\/")
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     Path(out_path).write_text(html.replace(marker, data), encoding="utf-8")
+
+
+def to_json(payload):
+    """Compact JSON (no spaces) for the page and the --json file."""
+    return json.dumps(payload, separators=(",", ":"))
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--csv", default=str(DATA / "bar_2026_10min.csv"),
                     help="Brisbane Bar 10-min prediction CSV (default: the 2026 file in data/)")
-    ap.add_argument("--stations", default=str(DATA / "stations.csv"))
-    ap.add_argument("--centreline", default=str(DATA / "centreline.csv"))
+    ap.add_argument("--stations", default=str(DATA / "stations.csv"),
+                    help="secondary-port stations: chainage, lag, ratio, MSL (default: data/)")
+    ap.add_argument("--centreline", default=str(DATA / "centreline.csv"),
+                    help="river centreline from build_centreline.py (default: data/)")
     ap.add_argument("--start", default=str(pd.Timestamp.now().date()),
-                    help="window start, local AEST (default: today 00:00)")
-    ap.add_argument("--hours", type=float, default=24)
-    ap.add_argument("--step-min", type=int, default=10, help="minutes between frames")
-    ap.add_argument("--spacing-km", type=float, default=0.5, help="distance between bars")
-    ap.add_argument("--out", default="output/river_tides.html")
-    ap.add_argument("--template", default=str(Path(__file__).parent / "web" / "river_tides_template.html"))
+                    help="window start, local AEST, e.g. 2026-11-08 or 2026-11-08T06:00 "
+                         "(default: today 00:00)")
+    ap.add_argument("--hours", type=float, default=24,
+                    help="window length in hours; the end frame is included (default: 24)")
+    ap.add_argument("--step-min", type=int, default=10,
+                    help="minutes between frames (default: 10). If it does not divide the "
+                         "window evenly, the window ends on the last whole step")
+    ap.add_argument("--spacing-km", type=float, default=0.5,
+                    help="distance between bars along the river, km (default: 0.5)")
+    ap.add_argument("--out", default=str(HERE / "output" / "river_tides.html"),
+                    help="page to write (default: output/river_tides.html)")
+    ap.add_argument("--template", default=str(HERE / "web" / "river_tides_template.html"),
+                    help="page template with the /*__DATA__*/null marker (default: web/)")
     ap.add_argument("--json", help="also write the page data to this JSON file")
-    a = ap.parse_args()
+    args = ap.parse_args()
 
-    start = pd.Timestamp(a.start)
-    frames = pd.date_range(start, start + pd.Timedelta(hours=a.hours), freq=f"{a.step_min}min")
+    if args.step_min < 1:
+        ap.error("--step-min must be at least 1")
+    if args.spacing_km <= 0:
+        ap.error("--spacing-km must be more than 0")
+    start = pd.Timestamp(args.start)
+    frames = pd.date_range(start, start + pd.Timedelta(hours=args.hours),
+                           freq=f"{args.step_min}min")
+    # The page works out rates from neighbouring frames, so it needs at least two.
+    if len(frames) < 2:
+        ap.error(f"--hours {args.hours:g} with --step-min {args.step_min} gives "
+                 f"{len(frames)} frame(s); need at least 2")
 
-    st = load_stations(a.stations)
+    st = load_stations(args.stations)
+    # MSL_Bar in the model: the Bar's row (chainage 0) of stations.csv, 1.32 m.
     bar_msl = float(st.loc[st.chainage_km == 0, "msl_m"].iloc[0])
 
-    bar = load_bar(a.csv)
-    # Keep 1 day either side: the largest lag (~3 h) needs Bar data before the start.
-    bar = bar[start - pd.Timedelta(days=1): frames[-1] + pd.Timedelta(days=1)]
+    full = load_bar(args.csv)
+    # Trim to the window with a 1-day margin each side, which is ample for the largest
+    # lag (160 min, Kholo). heights() checks the coverage exactly.
+    bar = full[start - pd.Timedelta(days=1): frames[-1] + pd.Timedelta(days=1)]
     if bar.empty:
-        raise SystemExit("No Bar data in the requested window - check --start against the CSV.")
+        raise SystemExit(f"No Bar data near the window: the CSV covers "
+                         f"{full.index[0]:%Y-%m-%d %H:%M} to {full.index[-1]:%Y-%m-%d %H:%M}. "
+                         "Check --start, or use another year's CSV.")
 
-    pts = sample_centreline(a.centreline, a.spacing_km, st.chainage_km.max())
+    pts = sample_centreline(args.centreline, args.spacing_km, st.chainage_km.max())
     pts = add_corrections(pts, st)
     h = heights(bar, frames, pts, bar_msl)
 
@@ -281,14 +311,14 @@ def main():
           f"{frames[0]:%Y-%m-%d %H:%M} to {frames[-1]:%Y-%m-%d %H:%M} AEST; "
           f"heights {h.min():.2f} to {h.max():.2f} m")
 
-    payload = build_payload(frames, pts, h, bar_msl, a.step_min,
-                            station_labels(st, a.centreline))
-    write_html(payload, a.template, a.out)
-    print("Wrote", a.out)
-    if a.json:
-        Path(a.json).parent.mkdir(parents=True, exist_ok=True)
-        Path(a.json).write_text(json.dumps(payload, separators=(",", ":")))
-        print("Wrote", a.json)
+    payload = build_payload(frames, pts, h, bar_msl, args.step_min,
+                            station_labels(st, args.centreline))
+    write_html(payload, args.template, args.out)
+    print("Wrote", args.out)
+    if args.json:
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json).write_text(to_json(payload))
+        print("Wrote", args.json)
 
 
 if __name__ == "__main__":
