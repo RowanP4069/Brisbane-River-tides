@@ -18,11 +18,8 @@ on:
     # start late at busy times, which is fine for a tide page.
     - cron: "10 14 * * *"
   workflow_dispatch:      # "Run workflow" button in the Actions tab
-  # Rebuild when the daily gauge collection finishes, so compare.html has its
-  # readings the same day (the nightly run above comes before the collection).
-  workflow_run:
-    workflows: ["Collect gauges"]
-    types: [completed]
+  # Also started by the collect-gauges workflow when it finishes (its "publish" job),
+  # so compare.html and report.html get the day's readings and reports the same day.
 
 permissions:
   contents: read

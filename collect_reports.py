@@ -6,11 +6,13 @@ form's sheet has a "public" tab with just the submission time and the published 
 of each report (JSON), and only that tab is published, as CSV (PUBLIC_CSV). Exact
 positions and notes stay in the sheet's other tab, which is not published.
 
-This script reads the whole public tab, checks every report, drops hidden ones
-(data/reports_hidden.csv), and rewrites reports/YYYY-MM.csv (by report time) in the
-folder given, a checkout of the reports branch. Rewriting everything each run keeps it
-simple and means a report hidden later disappears from the files too (git keeps the
-history). Run daily by .github/workflows/collect-gauges.yml.
+This script reads the whole public tab, checks every report, adds the accepted ones to
+those already in reports/YYYY-MM.csv (by report time) in the folder given, a checkout
+of the reports branch, drops any hidden by hand (data/reports_hidden.csv), and rewrites
+the files. Reports already saved are kept even if the fetch doesn't include them:
+Google's published copy can lag by 10 minutes or more and differs by location (on
+2026-11-09 a GitHub runner got an empty copy while a local fetch had two rows), and a
+stale fetch must never delete reports. Run daily by .github/workflows/collect-gauges.yml.
 
 Checks (a report failing any is left out, and counted in the printout):
   - JSON version 1, every field of the expected kind and range
@@ -175,10 +177,21 @@ def main():
 
     folder = Path(args.out) / "reports"
     folder.mkdir(parents=True, exist_ok=True)
-    for old in folder.glob("*.csv"):
+    # Keep what's saved; a report fetched again replaces its saved copy. Hidden ones
+    # go, whether saved or new.
+    ident = lambda r: (r["submitted_aest"], r["time_aest"], r["km"], r["bank"], r["dir"])
+    saved = {}
+    for old in sorted(folder.glob("*.csv")):
+        with old.open(newline="") as f:
+            for r in csv.DictReader(f):
+                saved[ident(r)] = r
         old.unlink()                     # rewritten in full below
+    n_saved = len(saved)
+    saved.update({ident(r): r for r in accepted})
+    keep = [r for r in saved.values() if r["submitted_aest"] not in hidden]
+    print(f"{n_saved} reports already saved, {len(keep)} after this run")
     by_month = {}
-    for r in sorted(accepted, key=lambda r: (r["time_aest"], r["submitted_aest"])):
+    for r in sorted(keep, key=lambda r: (r["time_aest"], r["submitted_aest"])):
         by_month.setdefault(r["time_aest"][:7], []).append(r)
     for month, rs in by_month.items():
         with (folder / f"{month}.csv").open("w", newline="") as f:

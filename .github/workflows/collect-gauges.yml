@@ -16,7 +16,8 @@ on:
   workflow_dispatch:      # "Run workflow" button in the Actions tab
 
 permissions:
-  contents: write         # to push to the gauge-data branch
+  contents: write         # to push to the gauge-data and reports branches
+  actions: write          # to start the page build when done
 
 concurrency:
   group: collect-gauges
@@ -83,3 +84,14 @@ jobs:
             git commit -q -m "Collect reports $(TZ=Australia/Brisbane date '+%Y-%m-%d %H:%M') AEST"
             git push -q origin reports
           fi
+
+  # Rebuild the website with what was just collected (compare.html, report.html).
+  # Started explicitly: the "workflow_run" trigger didn't always fire (2026-11-09).
+  publish:
+    needs: [collect, reports]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}
