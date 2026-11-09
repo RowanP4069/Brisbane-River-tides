@@ -51,6 +51,7 @@
   footer { max-width:760px; margin:0 auto; padding:6px 16px 14px; font-size:11px; color:var(--muted); }
   footer p { margin:2px 0; }
   footer a, main a { color:var(--accent); }
+  select { font:inherit; padding:5px 6px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--fg); max-width:100%; }
 </style>
 </head>
 <body>
@@ -70,8 +71,10 @@
   <div id="map"></div>
   <div class="row">
     <button type="button" id="locate">📍 Use my location</button>
-    <span class="muted" id="mapHint">or tap the river on the map</span>
+    <span class="muted" id="mapHint">or tap the river on the map (yellow dots are boat ramps)</span>
   </div>
+  <div class="row"><label class="muted">Near a boat ramp?
+    <select id="rampIn"><option value="">choose…</option></select></label></div>
   <div class="row" id="noMap">
     <span class="muted">The map couldn't start in this browser. Use your location, or give the place as distance
       up the river from the Brisbane Bar:</span>
@@ -171,6 +174,8 @@
   <p><b>Not for navigation.</b> Look after your own safety on the water.</p>
   <p>Tide predictions: Brisbane Bar predictions and tidal planes © State of Queensland (Maritime Safety Queensland),
     CC BY 4.0. River centreline: Watercourse lines - Queensland © State of Queensland (Department of Resources),
+    CC BY 4.0. Boat ramps: Boat Ramp locations © Brisbane City Council, CC BY 4.0, and (Goodna, Fairy Bower)
+    Beacon to Beacon Guide, Brisbane River and Bremer River © State of Queensland (Maritime Safety Queensland),
     CC BY 4.0. Basemap attribution on the map.</p>
   <p id="built" hidden></p>
 </footer>
@@ -309,6 +314,18 @@ function useKm() {                   // the no-map fallback
   showPlace();
 }
 $("kmIn").addEventListener("input", useKm);
+// Boat ramps, downstream to upstream, as quick places to jump to.
+const RAMPS = DATA.ramps;
+RAMPS.forEach((r, i) => {
+  const o = document.createElement("option"); o.value = i; o.textContent = `km ${r.km.toFixed(1)}: ${r.name}`;
+  $("rampIn").appendChild(o);
+});
+function useRamp(i) {
+  const r = RAMPS[i];
+  setPlace(r.lon, r.lat);
+  if (map) map.easeTo({ center: [r.lon, r.lat], zoom: 15 });
+}
+$("rampIn").addEventListener("change", () => { if ($("rampIn").value !== "") useRamp(+$("rampIn").value); });
 $("bankIn").addEventListener("change", useKm);
 
 // ---- Map ----------------------------------------------------------------------------
@@ -319,11 +336,30 @@ try {
     center: [152.99, -27.49], zoom: 10.3 });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   marker = new maplibregl.Marker({ color: "#c0392b" });
-  map.on("click", e => setPlace(e.lngLat.lng, e.lngLat.lat));
+  map.on("click", e => {
+    // A tap on a boat ramp is handled by the ramps layer (it puts the pin on the ramp).
+    if (map.getLayer("ramps") && map.queryRenderedFeatures(e.point, { layers: ["ramps"] }).length) return;
+    $("rampIn").value = "";
+    setPlace(e.lngLat.lng, e.lngLat.lat);
+  });
   map.on("load", () => {
     map.addSource("river", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString",
       coordinates: R.lon.map((x, i) => [x, R.lat[i]]) } } });
     map.addLayer({ id: "river", type: "line", source: "river", paint: { "line-color": "#1f6fb2", "line-width": 2, "line-opacity": .5 } });
+    map.addSource("ramps", { type: "geojson", data: { type: "FeatureCollection", features: RAMPS.map((r, i) => ({
+      type: "Feature", properties: { i, name: r.name }, geometry: { type: "Point", coordinates: [r.lon, r.lat] } })) } });
+    map.addLayer({ id: "ramps", type: "circle", source: "ramps", paint: { "circle-radius": 7, "circle-color": "#f2b705",
+      "circle-stroke-color": "#5d4a00", "circle-stroke-width": 1.5 } });
+    map.addLayer({ id: "ramp-labels", type: "symbol", source: "ramps", minzoom: 12.5, layout: {
+      "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"], "text-size": 12, "text-offset": [0, 1.1],
+      "text-anchor": "top", "text-optional": true }, paint: { "text-color": "#5d4a00", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
+    map.on("click", "ramps", e => {
+      const i = e.features[0].properties.i;
+      $("rampIn").value = i;
+      useRamp(i);
+    });
+    map.on("mouseenter", "ramps", () => { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", "ramps", () => { map.getCanvas().style.cursor = ""; });
     map.addSource("reports", { type: "geojson", data: { type: "FeatureCollection", features: DATA.reports.map((r, i) => ({
       type: "Feature", id: i, properties: { i, colour: COLOURS[r.dir] || "#888" }, geometry: { type: "Point", coordinates: lonLatAt(r.km) } })) } });
     map.addLayer({ id: "reports", type: "circle", source: "reports", paint: { "circle-radius": 6, "circle-color": ["get", "colour"],

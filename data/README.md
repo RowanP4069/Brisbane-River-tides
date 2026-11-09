@@ -76,6 +76,16 @@ The eight Brisbane City Council river gauges shown on the gauges page, downstrea
 
 ---
 
+## `ramps.csv`
+
+Public boat ramps on the Brisbane River itself, mouth to Kholo Creek, shown on the Report the flow page as places to find on the map. They're location references only: lanes, facilities and whether a ramp is usable at low tide are left out. Made by `python build_report.py --ramps` on 2026-11-09.
+
+- **Brisbane City Council (13 ramps):** dataset *Boat Ramp locations*, © Brisbane City Council, CC BY 4.0. <https://data.brisbane.qld.gov.au/explore/dataset/boat-ramp-locations>. Of its 39 ramps, only those within 350 m of the centreline are kept; the rest are on the bay, up creeks (Breakfast, Norman, Oxley and Bulimba creeks), or above Kholo Creek where the predictions stop. `name` is the council's street and suburb, plus "(canoe ramp)" where the council says so.
+- **Maritime Safety Queensland (2 ramps, Goodna and Fairy Bower):** the council's list stops at its boundary, and Ipswich City Council's open data has no ramp list (checked 2026-11-09). These two are read off the boat-ramp symbols on map BR-2 of *Beacon to Beacon Guide: Brisbane River and Bremer River* (2018), © State of Queensland (Department of Transport and Main Roads), CC BY 4.0, using the map's 1-minute grid. Checked against the Jindalee symbol on the same map, which lands 15 m from the council's position for that ramp. Both match OpenStreetMap's slipways to 0.1 km. The positions are in `GUIDE_RAMPS` in `build_report.py`.
+- **Columns:** `name`, `lat`, `lon`, `source` (council asset id, or the guide map). `km` is the ramp projected onto `centreline.csv`.
+
+---
+
 ## `stations.csv`
 
 **Source**
