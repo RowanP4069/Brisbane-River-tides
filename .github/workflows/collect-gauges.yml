@@ -1,6 +1,7 @@
 # Saves measured water levels before the sources drop them (council gauges keep
-# 72 hours, the MSQ Bar feed about a week). Runs collect_gauges.py from main and
-# commits any new readings to the gauge-data branch. main is never changed.
+# 72 hours, the MSQ Bar feed about a week, the storm tide feed 7 days). Runs
+# collect_gauges.py from main and commits any new readings to the gauge-data
+# branch. main is never changed.
 #
 # Note: GitHub turns off scheduled runs in a public repo after 60 days with no
 # activity. Re-enable it from the Actions tab if the data stops growing.

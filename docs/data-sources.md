@@ -84,7 +84,8 @@ Checked 2026-11-09, after seeing the Pinkenba Wharf chart embedded on a third-pa
   - `https://apps.des.qld.gov.au/data-sets/storm-tides/tide-7dayopdata.csv`, 61 sites
   - Columns: `Site, Seconds, DateTime, Water Level, Prediction, Residual, Latitude, Longitude`. 10-minute steps, last 7 days, DateTime in AEST (checked against Seconds), m above LAT.
   - Near Brisbane: `whyteislandnx` (Brisbane Bar), plus the Moreton Bay sites `shorncliffe`, `scarborough`, `tangalooma`, `rabybay`, `birkdale`, `bananabank`, `goldcoast`, `coombabahst` and `goldenbeach`.
-  - **Useful for:** the official residual at the Bar (a check on our weather baseline), and measured levels across Moreton Bay for roadmap item 15. Like the BCC data, it's only kept for 7 days, so archiving it would mean adding it to `collect_gauges.py`.
+  - **Useful for:** the official residual at the Bar (a check on our weather baseline), and measured levels across Moreton Bay for roadmap item 15.
+  - **Archived since 2026-11-09:** `collect_gauges.py` saves the Bar and the 11 sites above daily to `cds/YYYY-MM.csv` on the gauge-data branch, with the prediction (the residual is just the difference). The sister feed `stdtide-7dayopdata.csv` gave identical values for every shared reading, so only the larger feed is fetched. Its Bar readings match the MSQ 1-minute feed to within 2 mm (median).
 
 ### Queensland water monitoring (WMIP), upstream gauges
 
