@@ -61,6 +61,8 @@ The two pages link to each other at the top. Locally, `river_tides.py` writes `o
 
 `collect_gauges.py` saves measured river levels each day, before the sources drop them: eight Brisbane City Council gauges (Breakfast Creek to Moggill) and the MSQ Brisbane Bar gauge. A scheduled GitHub Action runs it and stores the readings on the [`gauge-data` branch](https://github.com/RowanP4069/Brisbane-River-tides/tree/gauge-data). They aren't used by the page yet; they're for comparing the predictions against what the river actually did. `docs/data-sources.md` describes the sources.
 
+`compare_gauges.py` compares those readings with the predictions, offline: run `git fetch origin gauge-data`, then `python compare_gauges.py` (optionally `--since` / `--until`). For each gauge it reports the datum offset (council gauges read AHD, the model LAT), how far the measured level strays from the prediction, and how early or late each high and low water came, with high and low water reported separately. It writes a report with a plot per gauge to `output/compare/`. The script's description lists the method's known limits. Two things the council data does: a gauge only reports when the level moves a step (1 to 5 cm), and the Jindalee and Moggill gauges seem unable to read low water.
+
 ## Limitations
 
 The main ones are below. `data/README.md` covers them in full, along with the data sources and how each file was made.
@@ -85,4 +87,4 @@ Built with help from Claude (Anthropic), using Claude Code.
 
 ## Licence
 
-The code (`river_tides.py`, `build_centreline.py`, `collect_gauges.py`, `fetch_bar.py`, `check_parity.py`, `build_gauges.py` and `web/`) is under the MIT licence; see [LICENSE](LICENSE). The files in `data/` keep their original CC BY 4.0 licences, as listed above.
+The code (`river_tides.py`, `build_centreline.py`, `collect_gauges.py`, `fetch_bar.py`, `check_parity.py`, `build_gauges.py`, `compare_gauges.py` and `web/`) is under the MIT licence; see [LICENSE](LICENSE). The files in `data/` keep their original CC BY 4.0 licences, as listed above.
