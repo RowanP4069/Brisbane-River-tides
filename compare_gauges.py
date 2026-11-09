@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Compare measured water levels with the model's predictions (offline, local only).
+"""Compare measured water levels with the model's predictions: the compare.html page.
 
 Reads the readings collect_gauges.py saves on the gauge-data branch, works out what
 river_tides.py predicts at each gauge for the same times, and reports how well they
-agree. The results feed roadmap decisions 4 (separate HW/LW lags) and 5 (ratio
-varying spring <-> neap); nothing here changes the model or the website.
+agree, as a page (compare.html on the website) where any period can be picked, plus a
+printed summary and CSVs. The results feed roadmap decisions 4 (separate HW/LW lags)
+and 5 (ratio varying spring <-> neap); nothing here changes the model.
+
+Python does all the fitting, once, over all the readings: the datum offset, gauge
+floors, and the timing and height of each high and low water. The page only picks out
+the readings and events in the chosen period and averages them (the Stats block in
+web/compare_template.html; check_parity.py checks it matches this script's summary).
 
 Gauges: the MSQ Brisbane Bar gauge (metres above LAT) and Brisbane City Council's
 eight river gauges (metres AHD, positions from data/gauges.csv). The model is
@@ -40,28 +46,34 @@ water?). find_floor detects it; readings near it and the low waters it hides are
 left out, and the floor is reported.
 
 Writes (output/ is not committed):
-  output/compare/report.html   summary table and one plot per gauge
-  output/compare/summary.csv   the summary table
+  output/compare.html          the page (web/compare_template.html with the data inlined)
+  output/compare/summary.csv   the summary table, over all the readings used
   output/compare/events.csv    every matched high and low water
 
 Usage:
   git fetch origin gauge-data          # get the latest readings first
   python compare_gauges.py
-  python compare_gauges.py --since 2026-11-10 --until 2026-11-25
+  python compare_gauges.py --since 2026-11-10 --until 2026-11-25    # printout and CSVs
+  python compare_gauges.py --stamp --out site/compare.html          # as the website is built
+
+The Bar's 1-minute readings are thinned to every 5 minutes, like the council slots.
+The page holds every reading, about 8 KB a day; at some 3 MB a year that's fine for now,
+but by mid-2027 consider monthly data files the page loads as needed.
 
 Weather, surge, wind and freshwater flow are all in the measured data and none are
 in the model, so the residuals are an upper limit on the model's own error.
 """
 import argparse
-import html
 import io
+import json
 import subprocess
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from river_tides import DATA, HERE, add_corrections, heights, load_bars, load_stations
+from river_tides import (BRISBANE, DATA, HERE, add_corrections, heights, load_bars,
+                         load_stations, to_json, write_html)
 
 BAR_GAUGE = "046046A"           # MSQ station number for Brisbane Bar (collect_gauges.py)
 
@@ -300,9 +312,45 @@ def analyse(row, readings, bar, bar_msl):
         "pub_hw_lag_min": row.lag_hw_min, "pub_lw_lag_min": row.lag_lw_min,
         "meas_hw_lag_min": row.lag_min + hw_dt, "meas_lw_lag_min": row.lag_min + lw_dt,
     }
-    plot = {"t": minutes(times), "meas": meas, "resid": resid, "floor": floor,
-            "grid_t": minutes(grid)[::5], "pred": grid_h[::5] + offset}
-    return summary, ev, plot
+    return summary, ev, page_gauge(row, times, meas, offset, floor, summary["step_cm"], ev)
+
+
+def page_gauge(row, times, meas, offset, floor, step_cm, ev):
+    """One gauge's entry in the page data: model values, fitted offset and floor, the
+    readings (minutes since REF as differences, whole mm), and the matched events.
+
+    The page works out residuals and statistics for whichever window is chosen, from
+    these alone (the Stats block in web/compare_template.html; check_parity.py checks
+    it reproduces this script's summary over all the data).
+    """
+    t = np.round(minutes(times)).astype(int)
+    mm = np.round(meas * 1000).astype(int)
+    if np.abs(mm / 1000 - meas).max() > 1e-9:
+        raise SystemExit(f"{row.sensor_id}: readings are not whole mm")
+    e = ev if not ev.empty else pd.DataFrame(columns=["pred_time", "kind", "dt_min",
+                                                      "dh_m", "range_ratio"])
+    return {
+        "id": row.sensor_id, "short": row.short, "name": row["name"],
+        "km": round(float(row.chainage_km), 2), "datum": row.datum,
+        # Full precision, so the page's predictions match heights() here.
+        "lag_min": float(row.lag_min), "ratio": float(row.ratio), "msl_m": float(row.msl_m),
+        "offset_m": offset,
+        "floor_m": floor,
+        # Readings at or below this are left out (None: no floor).
+        "floor_cut_m": floor + FLOOR_MARGIN_M if floor is not None else None,
+        "step_cm": step_cm,
+        "pub_hw_lag_min": float(row.lag_hw_min), "pub_lw_lag_min": float(row.lag_lw_min),
+        "t0": int(t[0]), "dt": np.diff(t).tolist(), "mm": mm.tolist(),
+        "ev": {
+            # Predicted time of each high/low water, whole minutes since REF: the page
+            # counts an event in a window by this.
+            "t": [int(round(x)) for x in minutes(e.pred_time)],
+            "kind": "".join(k[0] for k in e.kind),           # "H" / "L"
+            "dt": [int(x) for x in e.dt_min],                 # whole minutes already
+            "dh_mm": [int(round(x * 1000)) for x in e.dh_m],
+            "rr": [None if np.isnan(x) else round(float(x), 4) for x in e.range_ratio],
+        },
+    }
 
 
 # --- Output ------------------------------------------------------------------------
@@ -337,120 +385,27 @@ def print_summary(s):
               f"low water?); readings near it and the low waters below it are left out.")
 
 
-def svg_plot(p, datum, title):
-    """One gauge: measured readings and prediction, residual below. Plain SVG."""
-    W, H1, H2, L, R, T, GAP = 940, 200, 80, 48, 10, 18, 22
-    H = T + H1 + GAP + H2 + 22
-    x0, x1 = min(p["t"][0], p["grid_t"][0]), max(p["t"][-1], p["grid_t"][-1])
-    lo = min(np.nanmin(p["meas"]), np.nanmin(p["pred"]))
-    hi = max(np.nanmax(p["meas"]), np.nanmax(p["pred"]))
-    rmax = max(0.1, float(np.ceil(np.nanmax(np.abs(p["resid"])) * 10) / 10))
-
-    def X(t):
-        return L + (t - x0) / (x1 - x0) * (W - L - R)
-
-    def Y1(v):
-        return T + (hi - v) / (hi - lo) * H1
-
-    def Y2(v):
-        return T + H1 + GAP + (rmax - v) / (2 * rmax) * H2
-
-    def path(t, v, yf, gap_min=30):
-        """Polyline as an SVG path, broken where readings are more than gap_min apart."""
-        d, last = [], None
-        for a, b in zip(t, v):
-            if np.isnan(b):                 # left-out reading: break the line
-                last = None
-                continue
-            d.append(("L" if last is not None and a - last <= gap_min else "M")
-                     + f"{X(a):.1f},{yf(b):.1f}")
-            last = a
-        return " ".join(d)
-
-    out = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{html.escape(title)}">']
-    # Midnight gridlines with dates.
-    day = (REF + pd.Timedelta(minutes=x0)).normalize() + pd.Timedelta(days=1)
-    while (m := minutes([day])[0]) < x1:
-        out.append(f'<line class="grid" x1="{X(m):.1f}" x2="{X(m):.1f}" y1="{T}" '
-                   f'y2="{T + H1 + GAP + H2}"/>'
-                   f'<text class="lab" x="{X(m) + 3:.1f}" y="{H - 6}">{day:%d %b}</text>')
-        day += pd.Timedelta(days=1)
-    # Height axis ticks every 0.5 m.
-    for v in np.arange(np.ceil(lo * 2) / 2, hi + 1e-9, 0.5):
-        out.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{Y1(v):.1f}" y2="{Y1(v):.1f}"/>'
-                   f'<text class="lab" x="{L - 4}" y="{Y1(v) + 4:.1f}" text-anchor="end">{v:.1f}</text>')
-    for v in (-rmax, 0, rmax):
-        out.append(f'<line class="{"zero" if v == 0 else "grid"}" x1="{L}" x2="{W - R}" '
-                   f'y1="{Y2(v):.1f}" y2="{Y2(v):.1f}"/>'
-                   f'<text class="lab" x="{L - 4}" y="{Y2(v) + 4:.1f}" text-anchor="end">{v:+.1f}</text>')
-    out.append(f'<text class="lab" x="{L}" y="{T - 5}">m {datum}</text>'
-               f'<text class="lab" x="{L}" y="{T + H1 + GAP - 5}">residual, m</text>')
-    if p["floor"] is not None:
-        out.append(f'<line class="floor" x1="{L}" x2="{W - R}" y1="{Y1(p["floor"]):.1f}" '
-                   f'y2="{Y1(p["floor"]):.1f}"/><text class="lab" x="{W - R}" '
-                   f'y="{Y1(p["floor"]) - 4:.1f}" text-anchor="end">gauge floor?</text>')
-    out.append(f'<path class="pred" d="{path(p["grid_t"], p["pred"], Y1)}"/>')
-    out.append(f'<path class="meas" d="{path(p["t"], p["meas"], Y1)}"/>')
-    out.append(f'<path class="resid" d="{path(p["t"], p["resid"], Y2)}"/>')
-    out.append("</svg>")
-    return "\n".join(out)
-
-
-def write_report(out_dir, summary, plots, gauges, ref):
-    cols = {"short": "gauge", "chainage_km": "km", "readings": "readings",
-            "lat_below_ahd_m": "LAT below AHD (m)", "bar_mean_resid_m": "Bar mean resid (m)",
-            "floor_m": "floor (m AHD)", "step_cm": "step (cm)",
-            "rms_m": "RMS (m)", "p95_abs_m": "p95 (m)",
-            "hw_dt_min": "HW dt (min)", "n_hw": "n HW", "lw_dt_min": "LW dt (min)",
-            "n_lw": "n LW", "hw_dh_m": "HW dh (m)", "lw_dh_m": "LW dh (m)",
-            "range_ratio": "range ratio", "n_range": "n range",
-            "model_lag_min": "model lag", "pub_hw_lag_min": "pub HW lag",
-            "pub_lw_lag_min": "pub LW lag", "meas_hw_lag_min": "meas HW lag",
-            "meas_lw_lag_min": "meas LW lag"}
-    table = summary[list(cols)].rename(columns=cols).to_html(
-        index=False, float_format=lambda v: f"{v:.2f}", na_rep="-", border=0)
-    parts = []
-    for _, g in gauges.iterrows():
-        if g.sensor_id in plots:
-            title = f"{g['name']} ({g.sensor_id}), km {g.chainage_km:.1f}"
-            parts.append(f"<h2>{html.escape(title)}</h2>"
-                         + svg_plot(plots[g.sensor_id], g.datum, title))
-    first, last = summary["first"].min(), summary["last"].max()
-    page = f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Measured vs predicted</title>
-<style>
-:root {{ --bg:#fff; --fg:#222; --mute:#888; --grid:#e3e3e3; --meas:#c0392b; --pred:#2471a3; }}
-@media (prefers-color-scheme: dark) {{
-  :root {{ --bg:#16181c; --fg:#ddd; --mute:#888; --grid:#2c3036; --meas:#ef7b6c; --pred:#6fb0e0; }} }}
-body {{ background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif;
-       margin:16px auto; max-width:960px; padding:0 16px; }}
-table {{ border-collapse:collapse; font-size:12px; display:block; overflow-x:auto; }}
-th, td {{ padding:3px 6px; text-align:right; border-bottom:1px solid var(--grid); }}
-svg {{ width:100%; height:auto; }}
-.grid {{ stroke:var(--grid); }} .zero {{ stroke:var(--mute); }}
-.lab {{ fill:var(--mute); font-size:11px; }}
-.meas, .resid {{ fill:none; stroke:var(--meas); stroke-width:1.2; }}
-.pred {{ fill:none; stroke:var(--pred); stroke-width:1.5; }}
-.floor {{ stroke:var(--mute); stroke-dasharray:4 3; }}
-.key-m {{ color:var(--meas); }} .key-p {{ color:var(--pred); }}
-</style></head><body>
-<h1>Measured vs predicted water levels</h1>
-<p>Readings {first} to {last} AEST, from <code>{html.escape(ref)}</code>.
-<span class="key-m">Measured</span> against <span class="key-p">predicted</span>
-(model plus the fitted datum offset). Residual = measured &minus; predicted &minus; offset.
-dt = measured minus predicted time of high or low water, minutes (+ = later).
-Lags are minutes after the Bar: the model uses one lag; MSQ publishes separate HW and LW lags.
-The Bar row is the baseline: its residual is weather, surge and gauge error, not the river model.
-Floor: the gauge seems unable to read below this level (it goes silent for hours around
-low water and comes back at the same level); readings near it, and the low waters it hides,
-are left out of the statistics.</p>
-{table}
-{''.join(parts)}
-</body></html>
-"""
-    (out_dir / "report.html").write_text(page, encoding="utf-8")
+def build_payload(gauges_page, bar, bar_msl, readings, ref, built=None):
+    """Everything the page needs (becomes DATA in web/compare_template.html)."""
+    first, last = readings.time.min(), readings.time.max()
+    # The Bar series the page's model reads: the readings' span plus a day each side,
+    # ample for the largest lag (Moggill, about 2.5 h).
+    b = bar[first.floor("D") - pd.Timedelta(days=1): last.ceil("D") + pd.Timedelta(days=1)]
+    bar_mm = np.round(b.values * 1000).astype(int)
+    meta = {
+        "ref_time": REF.strftime("%Y-%m-%dT%H:%M"),   # reading times count minutes from this
+        "first_day": f"{first:%Y-%m-%d}", "last_day": f"{last:%Y-%m-%d}",
+        "last_reading": f"{last:%Y-%m-%dT%H:%M}",
+        "source": ref,
+    }
+    if built is not None:
+        meta["built"] = built.strftime("%Y-%m-%dT%H:%M")
+    return {
+        "meta": meta,
+        "model": {"bar_start": b.index[0].strftime("%Y-%m-%dT%H:%M"), "bar_step_min": 10,
+                  "bar_mm": bar_mm.tolist(), "bar_msl_m": bar_msl},
+        "gauges": gauges_page,
+    }
 
 
 def main():
@@ -460,8 +415,16 @@ def main():
                          "run 'git fetch origin gauge-data' first for the latest)")
     ap.add_argument("--since", help="first day to include, e.g. 2026-11-10 (AEST)")
     ap.add_argument("--until", help="last day to include, e.g. 2026-11-25 (AEST)")
-    ap.add_argument("--out-dir", default=str(HERE / "output" / "compare"),
-                    help="where to write report.html, summary.csv, events.csv")
+    ap.add_argument("--out", default=str(HERE / "output" / "compare.html"),
+                    help="page to write (default: output/compare.html; compare.html on the website)")
+    ap.add_argument("--template", default=str(HERE / "web" / "compare_template.html"),
+                    help="page template with the /*__DATA__*/null marker (default: web/)")
+    ap.add_argument("--csv-dir", default=str(HERE / "output" / "compare"),
+                    help="where to write summary.csv and events.csv (default: output/compare)")
+    ap.add_argument("--json", help="also write the page data, plus this script's summary, "
+                                   "to this JSON file (check_parity.py uses it)")
+    ap.add_argument("--stamp", action="store_true",
+                    help="show on the page when it was built (AEST); the website uses it")
     args = ap.parse_args()
 
     st = load_stations(DATA / "stations.csv")
@@ -469,7 +432,11 @@ def main():
     bar = load_bars(sorted(DATA.glob("bar_*_10min.csv")))
     gauges = gauge_list(st)
 
-    readings = pd.concat([read_branch(args.ref, "bcc"), read_branch(args.ref, "msq_bar")])
+    bar_readings = read_branch(args.ref, "msq_bar")
+    # The Bar reads every minute; every 5th minute is plenty for the fits and the page,
+    # and matches the council gauges' 5-minute slots.
+    bar_readings = bar_readings[bar_readings.time.dt.minute % 5 == 0]
+    readings = pd.concat([read_branch(args.ref, "bcc"), bar_readings])
     if args.since:
         readings = readings[readings.time >= pd.Timestamp(args.since)]
     if args.until:
@@ -479,7 +446,7 @@ def main():
                         (readings.time <= bar.index[-1] - pd.Timedelta(days=1))]
     readings = readings.dropna(subset=["value_m"])
 
-    summaries, events, plots = [], [], {}
+    summaries, events, page = [], [], []
     for _, g in gauges.iterrows():
         if (readings.gauge == g.sensor_id).sum() < 50:
             print(f"{g.short}: too few readings, skipped")
@@ -487,20 +454,27 @@ def main():
         s, ev, p = analyse(g, readings, bar, bar_msl)
         summaries.append(s)
         events.append(ev)
-        plots[g.sensor_id] = p
+        page.append(p)
     if not summaries:
         raise SystemExit("No gauge has enough readings in that period.")
     summary = pd.DataFrame(summaries)
     print_summary(summary)
 
-    out = Path(args.out_dir)
+    out = Path(args.csv_dir)
     out.mkdir(parents=True, exist_ok=True)
     summary.to_csv(out / "summary.csv", index=False, float_format="%.3f")
-    ev = pd.concat(events, ignore_index=True)
-    ev.to_csv(out / "events.csv", index=False, float_format="%.3f",
-              date_format="%Y-%m-%d %H:%M")
-    write_report(out, summary, plots, gauges, args.ref)
-    print(f"\nWrote {out / 'report.html'}, summary.csv, events.csv")
+    pd.concat(events, ignore_index=True).to_csv(out / "events.csv", index=False,
+                                                float_format="%.3f", date_format="%Y-%m-%d %H:%M")
+
+    built = pd.Timestamp.now(tz=BRISBANE).tz_localize(None) if args.stamp else None
+    payload = build_payload(page, bar, bar_msl, readings, args.ref, built)
+    write_html(payload, args.template, args.out)
+    print(f"\nWrote {args.out}, and summary.csv, events.csv in {out}")
+    if args.json:
+        payload["summary"] = json.loads(summary.to_json(orient="records"))
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json).write_text(to_json(payload))
+        print("Wrote", args.json)
 
 
 if __name__ == "__main__":

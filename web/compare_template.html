@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Measured vs Predicted</title>
+<style>
+  :root { --fg:#1d2329; --muted:#5d6873; --line:#d5dbe0; --bg:#f6f7f8; --panel:#ffffff; --accent:#1f6fb2;
+    --meas:#c0392b; --pred:#1f6fb2; --grid:#e6e9ec; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--fg);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding:8px 16px; display:flex; flex-wrap:wrap; gap:4px 16px; align-items:baseline; }
+  header h1 { font-size:16px; margin:0; }
+  header .sub { color:var(--muted); font-size:12px; }
+  /* Links between the pages; the same block is in the other two templates. */
+  nav.pages { width:100%; display:flex; flex-wrap:wrap; gap:4px 14px; font-size:13px; }
+  nav.pages a { color:var(--accent); text-decoration:none; }
+  nav.pages a[aria-current] { color:var(--fg); font-weight:600; }
+  main { max-width:1000px; margin:0 auto; padding:0 16px 16px; }
+  .intro { margin:4px 0 12px; }
+  #controls { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; padding:8px 12px; margin:0 0 12px;
+    background:var(--panel); border:1px solid var(--line); border-radius:6px; }
+  #controls label { display:flex; gap:6px; align-items:center; color:var(--muted); font-size:12px; }
+  #controls input, #controls button { font:inherit; }
+  #presets { display:flex; flex-wrap:wrap; gap:4px; }
+  #presets button[aria-pressed="true"] { font-weight:600; }
+  #winLabel { font-weight:600; }
+  .tableWrap { overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:6px; }
+  table { border-collapse:collapse; font-size:12px; width:100%; font-variant-numeric: tabular-nums; }
+  th, td { padding:4px 7px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; vertical-align:bottom; }
+  th[title] { cursor:help; text-decoration: underline dotted; text-underline-offset:3px; }
+  td:first-child, th:first-child { text-align:left; }
+  td.few { color:var(--muted); }
+  .note { color:var(--muted); font-size:12px; margin:6px 0 0; }
+  h2 { font-size:14px; margin:18px 0 2px; }
+  h2 .sub { color:var(--muted); font-weight:400; font-size:12px; }
+  .plot { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:4px; }
+  svg { width:100%; height:auto; display:block; }
+  .gl { stroke:var(--grid); } .zero { stroke:var(--muted); }
+  .lab { fill:var(--muted); font-size:11px; }
+  /* The plots scale down to the screen; keep their labels readable on a phone. */
+  @media (max-width: 600px) { svg .lab { font-size:24px; } }
+  .meas, .resid { fill:none; stroke:var(--meas); stroke-width:1.3; }
+  .pred { fill:none; stroke:var(--pred); stroke-width:1.6; }
+  .floor { stroke:var(--muted); stroke-dasharray:4 3; }
+  .key-m { color:var(--meas); font-weight:600; } .key-p { color:var(--pred); font-weight:600; }
+  details { margin:18px 0 0; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; }
+  summary { cursor:pointer; font-weight:600; }
+  details li { margin:4px 0; }
+  footer { max-width:1000px; margin:0 auto; padding:6px 16px 14px; font-size:11px; color:var(--muted); }
+  footer p { margin:2px 0; }
+  footer a, main a { color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <nav class="pages"><a href="index.html">Predictions</a><a href="gauges.html">Gauges (measured)</a><a href="compare.html" aria-current="page">Measured vs predicted</a></nav>
+  <h1>Measured vs predicted: how well did the predictions match the river?</h1>
+  <span class="sub" id="subtitle"></span>
+</header>
+
+<main>
+<p class="intro">The predictions page works out the tide along the river from the Brisbane Bar tide table. This page
+  checks it: for each gauge, the water level that was <span class="key-m">measured</span> against what the model
+  <span class="key-p">predicted</span> for the same place and time. Pick any period we have readings for. Hover over
+  (or tap) a column heading for what it means; <a href="#how">how this works</a> is at the bottom.</p>
+
+<div id="controls">
+  <label>From <input id="from" type="date"></label>
+  <label>To <input id="to" type="date"></label>
+  <div id="presets">
+    <button type="button" data-days="3">3 days</button>
+    <button type="button" data-days="7">7 days</button>
+    <button type="button" data-days="30">30 days</button>
+    <button type="button" data-days="0">All</button>
+  </div>
+  <span id="winLabel"></span>
+</div>
+
+<div class="tableWrap"><table id="table"></table></div>
+<p class="note" id="tableNote"></p>
+
+<div id="plots"></div>
+
+<details id="how">
+  <summary>How this works, and its limits</summary>
+  <ul>
+    <li><b>Predicted</b> is the same model as the predictions page, worked out at each gauge's place on the river.
+      <b>Measured</b> is what the gauges recorded: Brisbane City Council's river gauges (raw, unchecked) and Maritime
+      Safety Queensland's Brisbane Bar gauge, saved daily since early November 2026.</li>
+    <li><b>Datum.</b> The council gauges read metres AHD; the model gives metres above each place's own LAT. The gap
+      between the two differs along the river, so it is <i>measured</i>: the average of measured minus predicted over
+      all the readings. It's shown as "LAT below AHD" and stays the same whichever period you pick. Plots show the
+      prediction shifted by it. The Bar reads LAT itself, so nothing is fitted there, and its average difference is the
+      weather (wind, air pressure, surge) over the period.</li>
+    <li><b>Residual</b> is measured minus predicted (minus that offset). Weather, surge and freshwater flow are all in
+      the measurements and none are in the model, so this is an upper limit on the model's own error. Compare a
+      gauge with the Bar to see how much is weather.</li>
+    <li><b>Timing of high and low water.</b> The council gauges only send a reading when the level has moved a step
+      (1, 2 or 5 cm; see the "step" column), so right at high or low water, where the level hardly moves, there are
+      often no readings for an hour. Instead, the predicted curve within two hours of each turn is slid in time to
+      fit the readings either side. Tested on made-up data: 5 cm steps make the river look about 3 minutes early
+      (1–2 cm steps, under 1), and a real difference between the high-water and low-water lags shows up only about
+      half as large. A few tides are too few to go on; the counts are in brackets.</li>
+    <li><b>Gauge floors.</b> The Jindalee and Moggill gauges go silent for hours around low water and come back at
+      the same level, while the tide elsewhere keeps falling: most likely the sensor sits above low water and dries
+      out. Readings near that level (the dashed line), and the low waters it hides, are left out.</li>
+    <li><b>Range</b> compares each rise or fall: measured height change divided by predicted. Over a spring–neap cycle
+      (about two weeks) it shows whether the model's single ratio per place fits big and small tides alike.</li>
+  </ul>
+</details>
+</main>
+
+<footer>
+  <p><b>Not for navigation or flood warnings.</b> For warnings see the
+    <a href="https://www.bom.gov.au/qld/flood/">Bureau of Meteorology</a>.</p>
+  <p>Data: Telemetry sensors — Rainfall and Stream heights © Brisbane City Council, CC BY 4.0. Brisbane Bar tide
+    gauge near real time data and tide predictions, tidal planes © State of Queensland (Maritime Safety Queensland),
+    CC BY 4.0.</p>
+  <p id="built" hidden></p>
+</footer>
+
+<script>
+"use strict";
+// ---- Data, inlined by compare_gauges.py ---------------------------------------------
+// Per gauge: model values, the fitted datum offset and floor, the readings, and the
+// high and low waters Python matched. Python does all the fitting; this page only picks
+// out the readings and events in the chosen period and averages them.
+const DATA = /*__DATA__*/null;
+const $ = id => document.getElementById(id);
+
+// ---- Stats: BEGIN (check_parity.py runs this block in Node, so keep it self-contained:
+// it may use only DATA and what it defines itself) ------------------------------------
+// Times are naive AEST, read as if UTC for arithmetic (as on the predictions page).
+const MIN_MS = 60000, DAY_MS = 86400000;
+const isoMs = iso => Date.parse(iso.slice(0, 16) + ":00Z");     // "YYYY-MM-DDTHH:MM"
+const msIso = ms => new Date(ms).toISOString().slice(0, 16);
+const REF_MS = isoMs(DATA.meta.ref_time);
+const M = DATA.model;
+const BAR_T0 = isoMs(M.bar_start), BAR_N = M.bar_mm.length, BAR_STEP_MS = M.bar_step_min * MIN_MS;
+
+// Bar minus MSL_Bar at time ms, linear between readings (as np.interp); NaN outside.
+// Same as the predictions page's model; height = MSL + ratio * barAnomaly(t - lag).
+function barAnomaly(ms) {
+  const x = (ms - BAR_T0) / BAR_STEP_MS, j = Math.floor(x);
+  if (!(x >= 0 && x <= BAR_N - 1)) return NaN;
+  const a = M.bar_mm[j] / 1000 - M.bar_msl_m;
+  if (j === BAR_N - 1) return a;
+  const b = M.bar_mm[j + 1] / 1000 - M.bar_msl_m;
+  return a + (b - a) * (x - j);
+}
+const predict = (g, ms) => g.msl_m + g.ratio * barAnomaly(ms - g.lag_min * MIN_MS);
+
+// Unpack each gauge once: reading times (ms), heights (m), residuals (NaN = left out),
+// and event times (ms).
+for (const g of DATA.gauges) {
+  const n = g.mm.length;
+  g.tms = new Array(n); g.h = new Array(n); g.res = new Array(n); g.raw = new Array(n);
+  let m = g.t0;
+  for (let i = 0; i < n; i++) {
+    if (i > 0) m += g.dt[i - 1];
+    g.tms[i] = REF_MS + m * MIN_MS;
+    g.h[i] = g.mm[i] / 1000;
+    g.raw[i] = g.h[i] - predict(g, g.tms[i]);            // measured - predicted
+    const ok = g.floor_cut_m === null || g.h[i] > g.floor_cut_m;
+    g.res[i] = ok ? g.raw[i] - g.offset_m : NaN;
+  }
+  g.evMs = g.ev.t.map(m => REF_MS + m * MIN_MS);
+}
+
+const mean = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+function sd(a) {                     // sample standard deviation (as pandas .std())
+  if (a.length < 2) return null;
+  const m = mean(a);
+  return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1));
+}
+function percentile(a, p) {          // linear, as numpy's default
+  if (!a.length) return null;
+  const s = [...a].sort((x, y) => x - y), k = (s.length - 1) * p / 100, j = Math.floor(k);
+  return j + 1 < s.length ? s[j] + (s[j + 1] - s[j]) * (k - j) : s[j];
+}
+
+// Statistics for gauge g over [aMs, bMs): the same as compare_gauges.py's summary.
+function windowStats(g, aMs, bMs) {
+  const raw = [], res = [];
+  let readings = 0;
+  for (let i = 0; i < g.tms.length; i++) {
+    if (g.tms[i] < aMs || g.tms[i] >= bMs) continue;
+    readings++;
+    raw.push(g.raw[i]);
+    if (!Number.isNaN(g.res[i])) res.push(g.res[i]);
+  }
+  const ev = { H: { dt: [], dh: [] }, L: { dt: [], dh: [] } }, rr = [];
+  for (let i = 0; i < g.evMs.length; i++) {
+    if (g.evMs[i] < aMs || g.evMs[i] >= bMs) continue;
+    const k = g.ev.kind[i];
+    ev[k].dt.push(g.ev.dt[i]);
+    ev[k].dh.push(g.ev.dh_mm[i] / 1000);
+    if (g.ev.rr[i] !== null) rr.push(g.ev.rr[i]);
+  }
+  const absRes = res.map(Math.abs), hwDt = mean(ev.H.dt), lwDt = mean(ev.L.dt);
+  return {
+    readings,
+    bar_mean_resid_m: g.datum === "LAT" ? mean(raw) : null,
+    rms_m: res.length ? Math.sqrt(mean(res.map(x => x * x))) : null,
+    p95_abs_m: percentile(absRes, 95),
+    max_abs_m: absRes.length ? Math.max(...absRes) : null,
+    n_hw: ev.H.dt.length, hw_dt_min: hwDt, hw_dt_sd: sd(ev.H.dt),
+    n_lw: ev.L.dt.length, lw_dt_min: lwDt, lw_dt_sd: sd(ev.L.dt),
+    hw_dh_m: mean(ev.H.dh), lw_dh_m: mean(ev.L.dh),
+    n_range: rr.length, range_ratio: mean(rr),
+    meas_hw_lag_min: hwDt === null ? null : g.lag_min + hwDt,
+    meas_lw_lag_min: lwDt === null ? null : g.lag_min + lwDt,
+  };
+}
+// ---- Stats: END --------------------------------------------------------------------
+
+// ---- Period ---------------------------------------------------------------------------
+// The period is whole days: from 00:00 on the From day to 24:00 on the To day (AEST).
+const FIRST_DAY = isoMs(DATA.meta.first_day + "T00:00"), LAST_DAY = isoMs(DATA.meta.last_day + "T00:00");
+const dayText = ms => msIso(ms).slice(0, 10);
+const dayFromText = t => /^\d{4}-\d{2}-\d{2}$/.test(t) ? isoMs(t + "T00:00") : NaN;
+const clampDay = d => Math.min(LAST_DAY, Math.max(FIRST_DAY, d));
+const fmtDay = ms => new Date(ms).toLocaleDateString("en-AU",
+  { timeZone: "UTC", weekday: "short", day: "numeric", month: "short", year: "numeric" });
+const fmtShort = ms => new Date(ms).toLocaleDateString("en-AU", { timeZone: "UTC", day: "numeric", month: "short" });
+let FROM, TO;                        // day starts (ms)
+
+for (const id of ["from", "to"]) { $(id).min = DATA.meta.first_day; $(id).max = DATA.meta.last_day; }
+$("subtitle").textContent = `Readings from ${fmtDay(FIRST_DAY)} to ${fmtDay(LAST_DAY)}; `
+  + `latest ${DATA.meta.last_reading.slice(11)} AEST on the last day.`;
+if (DATA.meta.built) {
+  $("built").textContent = `Page built ${fmtDay(isoMs(DATA.meta.built))} ${DATA.meta.built.slice(11)} AEST, `
+    + `from the readings saved by then.`;
+  $("built").hidden = false;
+}
+
+function setPeriod(from, to, fromHash) {
+  from = clampDay(from); to = clampDay(to);
+  if (to < from) [from, to] = [to, from];
+  FROM = from; TO = to;
+  $("from").value = dayText(FROM); $("to").value = dayText(TO);
+  const days = Math.round((TO - FROM) / DAY_MS) + 1;
+  $("winLabel").textContent = `${days} day${days === 1 ? "" : "s"}`;
+  for (const b of document.querySelectorAll("#presets button")) {
+    const d = +b.dataset.days;
+    const match = TO === LAST_DAY && (d === 0 ? FROM === FIRST_DAY : FROM === clampDay(LAST_DAY - (d - 1) * DAY_MS));
+    b.setAttribute("aria-pressed", match);
+  }
+  const hash = `#${dayText(FROM)}/${dayText(TO)}`;
+  if (!fromHash && location.hash !== hash) history.replaceState(null, "", hash);
+  render();
+}
+function preset(days) {
+  setPeriod(days === 0 ? FIRST_DAY : LAST_DAY - (days - 1) * DAY_MS, LAST_DAY);
+}
+function fromHash() {
+  const m = location.hash.match(/^#(\d{4}-\d{2}-\d{2})\/(\d{4}-\d{2}-\d{2})$/);
+  if (!m) return false;
+  const a = dayFromText(m[1]), b = dayFromText(m[2]);
+  if (Number.isNaN(a) || Number.isNaN(b)) return false;
+  setPeriod(a, b, true);
+  return true;
+}
+$("from").addEventListener("change", () => { const d = dayFromText($("from").value); if (!Number.isNaN(d)) setPeriod(d, TO); });
+$("to").addEventListener("change", () => { const d = dayFromText($("to").value); if (!Number.isNaN(d)) setPeriod(FROM, d); });
+for (const b of document.querySelectorAll("#presets button")) b.addEventListener("click", () => preset(+b.dataset.days));
+window.addEventListener("hashchange", fromHash);
+
+// ---- Table ----------------------------------------------------------------------------
+const f = (v, d, sign) => v === null || v === undefined || Number.isNaN(v) ? "–"
+  : (sign && v > 0 ? "+" : "") + v.toFixed(d).replace("-", "−");
+const COLS = [
+  ["Gauge", "Gauge, and its distance up the river from the Brisbane Bar (km)."],
+  ["Readings", "Readings in this period. The council gauges only report when the level moves."],
+  ["Step", "The gauge's reporting step: it sends a reading when the level has moved this much."],
+  ["LAT below AHD", "How far this place's LAT (the model's zero) is below AHD (the gauge's zero), "
+    + "measured from all the readings. At the Bar (both LAT): the average measured minus predicted in this "
+    + "period, i.e. the weather."],
+  ["RMS", "Typical size of the residual (measured − predicted), metres."],
+  ["95%", "95% of residuals in this period were smaller than this, metres."],
+  ["HW timing", "Measured minus predicted time of high water, minutes: average ± spread (number of tides). "
+    + "+ = later than predicted."],
+  ["LW timing", "As HW timing, for low water."],
+  ["HW height", "Measured minus predicted height of high water, metres (average)."],
+  ["LW height", "As HW height, for low water."],
+  ["Range", "Measured ÷ predicted height change of each rise or fall (average, number). 1.00 = the model's "
+    + "range is right; below 1 = the river's tide is smaller than predicted."],
+  ["Lag: model", "Minutes after the Bar that the model uses here (one value for high and low water)."],
+  ["MSQ HW/LW", "Maritime Safety Queensland's published lags for high and low water, interpolated to here."],
+  ["Measured HW/LW", "The model's lag plus the measured timing: the lags these readings suggest."],
+];
+function render() {
+  const a = FROM, b = TO + DAY_MS;
+  let html = "<thead><tr>" + COLS.map(([h, t]) => `<th title="${t}">${h}</th>`).join("") + "</tr></thead><tbody>";
+  for (const g of DATA.gauges) {
+    const s = windowStats(g, a, b);
+    const timing = (m, sdv, n) => n ? `${f(m, 0, true)} ± ${sdv === null ? "–" : sdv.toFixed(0)} (${n})` : "–";
+    const datum = g.datum === "LAT" ? `${f(s.bar_mean_resid_m, 2, true)} weather` : f(-g.offset_m, 2);
+    const lag2 = (x, y) => `${f(x, 0)} / ${f(y, 0)}`;
+    html += `<tr><td>${g.short} <span class="lab">${g.km.toFixed(1)} km</span></td>`
+      + `<td>${s.readings}</td><td>${g.step_cm < 1 ? "<1" : g.step_cm.toFixed(0)} cm</td>`
+      + `<td>${datum}${g.floor_m !== null ? " *" : ""}</td>`
+      + `<td>${f(s.rms_m, 2)}</td><td>${f(s.p95_abs_m, 2)}</td>`
+      + `<td class="${s.n_hw < 3 ? "few" : ""}">${timing(s.hw_dt_min, s.hw_dt_sd, s.n_hw)}</td>`
+      + `<td class="${s.n_lw < 3 ? "few" : ""}">${timing(s.lw_dt_min, s.lw_dt_sd, s.n_lw)}</td>`
+      + `<td>${f(s.hw_dh_m, 2, true)}</td><td>${f(s.lw_dh_m, 2, true)}</td>`
+      + `<td>${s.n_range ? `${f(s.range_ratio, 2)} (${s.n_range})` : "–"}</td>`
+      + `<td>${f(g.lag_min, 0)}</td><td>${lag2(g.pub_hw_lag_min, g.pub_lw_lag_min)}</td>`
+      + `<td>${lag2(s.meas_hw_lag_min, s.meas_lw_lag_min)}</td></tr>`;
+  }
+  $("table").innerHTML = html + "</tbody>";
+  const floors = DATA.gauges.filter(g => g.floor_m !== null)
+    .map(g => `${g.short} (about ${g.floor_m.toFixed(2)} m AHD)`);
+  $("tableNote").textContent = (floors.length ? `* Seems unable to read below a level: ${floors.join(", ")}; `
+    + "low waters there aren't counted. " : "") + "Grey timings rest on fewer than 3 tides.";
+  $("plots").innerHTML = DATA.gauges.map(g => plotHtml(g, a, b)).join("");
+}
+
+// ---- Plots ----------------------------------------------------------------------------
+// Measured readings and the prediction (shifted by the datum offset), residual below.
+function plotHtml(g, a, b) {
+  // Room above each panel for its unit label, at the larger phone font too.
+  const W = 940, H1 = 190, H2 = 70, L = 44, R = 8, T = 26, GAP = 34, H = T + H1 + GAP + H2 + 24;
+  const X = t => L + (t - a) / (b - a) * (W - L - R);
+  const tt = [], hh = [], rr = [];
+  for (let i = 0; i < g.tms.length; i++) {
+    if (g.tms[i] < a || g.tms[i] >= b) continue;
+    tt.push(g.tms[i]); hh.push(g.h[i]); rr.push(g.res[i]);
+  }
+  const STEP = Math.max(5, Math.round((b - a) / MIN_MS / 1500 / 5) * 5) * MIN_MS;   // ~1500 points
+  const pt = [], ph = [];
+  for (let t = a; t <= b; t += STEP) { pt.push(t); ph.push(predict(g, t) + g.offset_m); }
+  const all = hh.concat(ph.filter(Number.isFinite));
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const finiteRes = rr.filter(Number.isFinite).map(Math.abs);
+  const rmax = Math.max(0.1, Math.ceil((finiteRes.length ? Math.max(...finiteRes) : 0.1) * 10) / 10);
+  const Y1 = v => T + (hi - v) / (hi - lo) * H1;
+  const Y2 = v => T + H1 + GAP + (rmax - v) / (2 * rmax) * H2;
+  // Path broken at gaps over 30 min and at left-out readings.
+  function path(t, v, yf, gapMs) {
+    let d = "", last = null;
+    for (let i = 0; i < t.length; i++) {
+      if (!Number.isFinite(v[i])) { last = null; continue; }
+      d += (last !== null && t[i] - last <= gapMs ? "L" : "M") + X(t[i]).toFixed(1) + "," + yf(v[i]).toFixed(1);
+      last = t[i];
+    }
+    return d;
+  }
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${g.name}: measured and predicted water level">`;
+  const days = (b - a) / DAY_MS, every = days <= 10 ? 1 : days <= 31 ? 3 : days <= 92 ? 7 : 30;
+  for (let d = a, k = 0; d < b; d += DAY_MS, k++) {
+    s += `<line class="gl" x1="${X(d).toFixed(1)}" x2="${X(d).toFixed(1)}" y1="${T}" y2="${T + H1 + GAP + H2}"/>`;
+    if (k % every === 0) s += `<text class="lab" x="${(X(d) + 3).toFixed(1)}" y="${H - 5}">${fmtShort(d)}</text>`;
+  }
+  for (let v = Math.ceil(lo * 2) / 2; v <= hi + 1e-9; v += 0.5) {
+    s += `<line class="gl" x1="${L}" x2="${W - R}" y1="${Y1(v).toFixed(1)}" y2="${Y1(v).toFixed(1)}"/>`
+      + `<text class="lab" x="${L - 4}" y="${(Y1(v) + 4).toFixed(1)}" text-anchor="end">${v.toFixed(1)}</text>`;
+  }
+  for (const v of [-rmax, 0, rmax]) {
+    s += `<line class="${v === 0 ? "zero" : "gl"}" x1="${L}" x2="${W - R}" y1="${Y2(v).toFixed(1)}" y2="${Y2(v).toFixed(1)}"/>`
+      + `<text class="lab" x="${L - 4}" y="${(Y2(v) + 4).toFixed(1)}" text-anchor="end">${f(v, 1, true)}</text>`;
+  }
+  s += `<text class="lab" x="${L}" y="${T - 4}">m ${g.datum}</text>`
+    + `<text class="lab" x="${L}" y="${T + H1 + GAP - 5}">residual, m</text>`;
+  if (g.floor_m !== null && g.floor_m >= lo && g.floor_m <= hi) {
+    s += `<line class="floor" x1="${L}" x2="${W - R}" y1="${Y1(g.floor_m).toFixed(1)}" y2="${Y1(g.floor_m).toFixed(1)}"/>`
+      + `<text class="lab" x="${W - R}" y="${(Y1(g.floor_m) - 4).toFixed(1)}" text-anchor="end">gauge floor?</text>`;
+  }
+  s += `<path class="pred" d="${path(pt, ph, Y1, Infinity)}"/>`
+    + `<path class="meas" d="${path(tt, hh, Y1, 30 * MIN_MS)}"/>`
+    + `<path class="resid" d="${path(tt, rr, Y2, 30 * MIN_MS)}"/></svg>`;
+  return `<h2>${g.name} <span class="sub">${g.id}, ${g.km.toFixed(1)} km from the Bar`
+    + `${tt.length ? "" : " — no readings in this period"}</span></h2><div class="plot">${s}</div>`;
+}
+
+if (!fromHash()) preset(7);
+</script>
+</body>
+</html>
