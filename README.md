@@ -65,10 +65,12 @@ The two pages link to each other at the top. Locally, `river_tides.py` writes `o
 
 ## Report the flow (citizen science)
 
-A fourth page, **Report the flow**, lets people on the river report which way the water was moving, how strongly, and how the water looked: <https://rowanp4069.github.io/Brisbane-River-tides/report.html>. When a report is sent, the page compares it with the model at that place and time (rising level: water coming in; falling: going out; within 45 minutes of high or low water: turning) and says whether it matches. A mismatch is useful data: the current turns later than the level, and freshwater flow pushes it downstream.
+A fourth page, **Report the flow**, lets people on the river report which way the water was moving, how strongly, and how the water looked: <https://rowanp4069.github.io/Brisbane-River-tides/report.html>. Reports are taken from the mouth up to the old weir ruin below Mt Crosby (km 87.4), where the tide stops. When a report is sent below Kholo Creek, the page compares it with the model at that place and time (rising level: water coming in; falling: going out; within 45 minutes of high or low water: turning) and says whether it matches. A mismatch is useful data: the current turns later than the level, and freshwater flow pushes it downstream.
 
 - `build_report.py` builds the page. Reports go to a Google Form owned by the project. Its sheet publishes only the time and the public part of each report: the place as km up the river and which bank, never the exact position, and not the notes.
 - `collect_reports.py` checks the published reports once a day (time, place, values; exact repeats dropped) and rewrites the [`reports` branch](https://github.com/RowanP4069/Brisbane-River-tides/tree/reports), whose README describes the columns. The page's map and list show the last 30 days.
+- The map shows public boat ramps (`data/ramps.csv`, from Brisbane City Council and MSQ's Beacon to Beacon guide) as places to find; tapping one sets the report's place.
+- Above Kholo Creek, where the tide tables stop, reports are recorded without a verdict.
 - To hide a report, add its `submitted_aest` to `data/reports_hidden.csv`. It disappears at the next daily run.
 - Reports are shared under CC BY 4.0.
 

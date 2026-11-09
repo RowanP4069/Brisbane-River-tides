@@ -64,22 +64,32 @@ MAX_OFF_M = 350                   # a pin further than this from the centreline 
                                   # Not 150: the river is ~300 m wide in the city, and the
                                   # council gauges on its banks are 105-279 m from the line.
 REPORTS_REF = "origin/reports"
+# Reports are accepted up to here: the ruin of the old weir below Mt Crosby weir (the
+# southern of the two weirs on MSQ Beacon to Beacon map BR-1, read off its grid). In
+# the project owner's experience kayaking it, the gravel runs just below the ruin are
+# where the tide stops. Between Kholo Creek (the last MSQ station, where the
+# predictions stop) and here, reports are kept but get no verdict.
+REPORT_KM_MAX = 87.4
 
 # Boat ramps (data/ramps.csv): location references only, no details.
 RAMPS_CSV = DATA / "ramps.csv"
 BCC_RAMPS_URL = ("https://data.brisbane.qld.gov.au/api/explore/v2.1/catalog/datasets/"
                  "boat-ramp-locations/exports/json")
-# Brisbane City Council's list stops at its boundary, so the two public ramps between
-# Jindalee and Kholo Creek come from Maritime Safety Queensland's Beacon to Beacon Guide,
-# Brisbane River and Bremer River (2018, CC BY 4.0), map BR-2: positions read off the
-# boat-ramp symbols using the map's 1-minute grid (rendered at 200 dpi; the Jindalee
-# symbol read this way lands 15 m from the council's position for that ramp). Both
+# Brisbane City Council's list stops at its boundary, so the other public ramps come from
+# Maritime Safety Queensland's Beacon to Beacon Guide, Brisbane River and Bremer River
+# (2018, CC BY 4.0): positions read off the boat-ramp symbols using the maps' 1-minute
+# grid (rendered at 200 dpi). Checks: the Jindalee symbol on BR-2 lands 15 m from the
+# council's position for that ramp, and Kookaburra Park on BR-1 20 m from the council's
+# Caringal Dr, Karana Downs ramp (which is Kookaburra Park). Goodna and Barellan Point
 # agree with OpenStreetMap's slipways (km 61.6 and 75.0). Ipswich City Council's open
 # data (data.gov.au, checked 2026-11-09) has no boat ramp list.
 GUIDE_RAMPS = [
-    {"name": "Goodna (Hospital Corner)", "lat": -27.60324, "lon": 152.90079},
-    {"name": "Fairy Bower (below Kholo Creek)", "lat": -27.54097, "lon": 152.85134},
+    {"name": "Goodna (Hospital Corner)", "lat": -27.60324, "lon": 152.90079, "map": "BR-2"},
+    {"name": "Barellan Point", "lat": -27.54097, "lon": 152.85134, "map": "BR-2"},
+    {"name": "Colleges Crossing", "lat": -27.55632, "lon": 152.80024, "map": "BR-1"},
 ]
+# The council's names for ramps that are better known by a park's name.
+RAMP_NAMES = {"RA1011": "Kookaburra Park, Karana Downs"}
 RAMP_MAX_OFF_M = 350              # on the river itself (not up a creek), as MAX_OFF_M
 
 
@@ -88,22 +98,21 @@ def make_ramps():
     req = urllib.request.Request(BCC_RAMPS_URL, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=120) as resp:
         bcc = json.load(resp)
-    st = load_stations(DATA / "stations.csv")
-    km_max = float(st.chainage_km.max())
     cl = pd.read_csv(DATA / "centreline.csv")
     rows = []
     for r in bcc:
-        name = f"{r['street'].title()}, {r['suburb'].title()}"
+        name = RAMP_NAMES.get(r["asset_id"], f"{r['street'].title()}, {r['suburb'].title()}")
         if "CANOE" in r["descriptio"]:
             name += " (canoe ramp)"
         rows.append({"name": name, "lat": r["latitude"], "lon": r["longitude"],
                      "source": f"BCC {r['asset_id']}"})
-    rows += [dict(g, source="MSQ Beacon to Beacon BR-2") for g in GUIDE_RAMPS]
+    rows += [{"name": g["name"], "lat": g["lat"], "lon": g["lon"],
+              "source": f"MSQ Beacon to Beacon {g['map']}"} for g in GUIDE_RAMPS]
     out = []
     for r in rows:
         km, off = project_onto(cl, r["lon"], r["lat"])
-        # On the river (not up a creek or on the bay) and within the predictions' reach.
-        if off <= RAMP_MAX_OFF_M and km <= km_max + 0.2:
+        # On the river (not up a creek or on the bay), up to where reports are taken.
+        if off <= RAMP_MAX_OFF_M and km <= REPORT_KM_MAX:
             out.append(dict(r, km=round(km, 2), lat=round(r["lat"], 6), lon=round(r["lon"], 6)))
     out.sort(key=lambda r: r["km"])
     with RAMPS_CSV.open("w", newline="") as f:
@@ -149,8 +158,9 @@ def build_payload(built=None, today=None, reports_ref=REPORTS_REF):
         raise SystemExit("No Bar predictions around today: add the year's file (fetch_bar.py)")
     km_max = float(st.chainage_km.max())                  # Kholo Creek: the model's end
     cl = pd.read_csv(DATA / "centreline.csv")
-    river = cl[cl.chainage_km <= km_max + 0.5]
-    meta = {"km_max": km_max, "max_off_m": MAX_OFF_M, "report_days": REPORT_DAYS,
+    river = cl[cl.chainage_km <= REPORT_KM_MAX + 0.5]
+    meta = {"km_max": km_max, "report_km_max": REPORT_KM_MAX, "max_off_m": MAX_OFF_M,
+            "report_days": REPORT_DAYS,
             "timezone": "AEST (UTC+10)"}
     if built is not None:
         meta["built"] = built.strftime("%Y-%m-%dT%H:%M")

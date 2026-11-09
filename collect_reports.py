@@ -18,7 +18,7 @@ Checks (a report failing any is left out, and counted in the printout):
   - JSON version 1, every field of the expected kind and range
   - the reported time no later than 10 min after it was submitted, and no more than
     2 days (plus 10 min) before
-  - the place: km 0 to Kholo Creek, a bank, and within 350 m of the centreline
+  - the place: km 0 to the old weir ruin (km 87.4), a bank, within 350 m of the centreline
   - no exact repeat of an accepted report (double taps)
 Aliases are trimmed to 30 characters; one containing a web address is blanked.
 
@@ -52,7 +52,7 @@ BANKS = {"mid", "left", "right"}
 PROBLEMS = {"debris", "rubbish", "foam", "oil", "algae", "smell", "dead_fish"}
 VERDICTS = {"match", "turn", "mismatch", "none"}
 MAX_OFF_M = 350                  # as build_report.MAX_OFF_M
-KM_MAX = 75.8 + 0.2              # Kholo Creek, as the page allows
+KM_MAX = 87.4                    # the old weir ruin, as build_report.REPORT_KM_MAX
 SLACK_TIME = timedelta(minutes=10)
 MAX_AGE = timedelta(days=2)
 

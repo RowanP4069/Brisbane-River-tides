@@ -236,7 +236,10 @@ function tideState(km, ms) {
 }
 const fmtMin = m => { m = Math.round(Math.abs(m)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 // Verdict for a reported direction: "match" | "turn" | "mismatch" | "none", with words.
-function verdictFor(dir, st) {
+function verdictFor(dir, st, km) {
+  if (km > KM_MAX + 0.2) return { v: "none", head: "No prediction here",
+    text: `This is above Kholo Creek (km ${KM_MAX.toFixed(1)}), where the tide tables stop, so there's nothing to compare with. `
+      + "Your report is still recorded: reports are the only evidence of how the flow behaves up to the weir." };
   if (!st) return { v: "none", head: "Can't compare", text: "The predictions loaded in this page don't cover that time." };
   const nearTurn = st.turn && Math.abs(st.minFromTurn) <= TURN_MIN;
   const turnWords = st.turn ? `Predicted ${st.turn.kind} water there was ${fmtMin(st.minFromTurn)} `
@@ -276,7 +279,9 @@ function snap(lon, lat) {
   return best;
 }
 const lonLatAt = km => [interp(km, R.km, R.lon), interp(km, R.km, R.lat)];
-const KM_MAX = DATA.meta.km_max, MAX_OFF = DATA.meta.max_off_m;
+// Predictions reach Kholo Creek (KM_MAX); reports are taken up to the old weir ruin
+// (REPORT_KM_MAX), where the tide stops. In between, a report gets no verdict.
+const KM_MAX = DATA.meta.km_max, REPORT_KM_MAX = DATA.meta.report_km_max, MAX_OFF = DATA.meta.max_off_m;
 const BANK_WORDS = { mid: "mid-river", left: "left bank (looking downstream)", right: "right bank (looking downstream)" };
 const place = { lon: null, lat: null, km: null, off: null, bank: null };
 function setPlace(lon, lat) {
@@ -296,7 +301,7 @@ function showPlace() {
 function placeProblem() {
   if (place.km === null) return "Choose a place: tap the river, or use your location.";
   if (place.off !== null && place.off > MAX_OFF) return `That's ${Math.round(place.off)} m from the river. Tap on the water, or move closer.`;
-  if (place.km > KM_MAX + 0.2) return `That's above Kholo Creek (km ${KM_MAX.toFixed(1)}), where the predictions stop.`;
+  if (place.km > REPORT_KM_MAX) return `That's above the old weir ruin below Mt Crosby (km ${REPORT_KM_MAX.toFixed(1)}), where the tide stops.`;
   return null;
 }
 $("locate").addEventListener("click", () => {
@@ -433,7 +438,7 @@ $("send").addEventListener("click", async () => {
   const errs = problems();
   $("errors").textContent = errs.join(" ");
   if (errs.length) return;
-  const ms = isoMs($("when").value), st = tideState(place.km, ms), ver = verdictFor(picked("dir"), st);
+  const ms = isoMs($("when").value), st = tideState(place.km, ms), ver = verdictFor(picked("dir"), st, place.km);
   const report = buildReport(ms, ver.v);
   const priv = { lat: place.lat, lon: place.lon, off_m: place.off === null ? null : Math.round(place.off),
     notes: $("notes").value.trim().slice(0, 1000) };
