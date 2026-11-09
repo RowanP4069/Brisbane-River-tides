@@ -63,6 +63,15 @@ The two pages link to each other at the top. Locally, `river_tides.py` writes `o
 
 `compare_gauges.py` compares those readings with the predictions: run `git fetch origin gauge-data`, then `python compare_gauges.py` (optionally `--since` / `--until`). For each gauge it reports the datum offset (council gauges read AHD, the model LAT), how far the measured level strays from the prediction, and how early or late each high and low water came, with high and low water reported separately. It builds the **Measured vs predicted** page (<https://rowanp4069.github.io/Brisbane-River-tides/compare.html>; `output/compare.html` locally), where you can pick any period we have readings for; the fitting is done once in Python and the page only averages over the period you choose. The website rebuilds it whenever the daily collection finishes. The script's description lists the method's known limits. Two things the council data does: a gauge only reports when the level moves a step (1 to 5 cm), and the Jindalee and Moggill gauges seem unable to read low water.
 
+## Report the flow (citizen science)
+
+A fourth page, **Report the flow**, lets people on the river report which way the water was moving, how strongly, and how the water looked: <https://rowanp4069.github.io/Brisbane-River-tides/report.html>. When a report is sent, the page compares it with the model at that place and time (rising level: water coming in; falling: going out; within 45 minutes of high or low water: turning) and says whether it matches. A mismatch is useful data: the current turns later than the level, and freshwater flow pushes it downstream.
+
+- `build_report.py` builds the page. Reports go to a Google Form owned by the project. Its sheet publishes only the time and the public part of each report: the place as km up the river and which bank, never the exact position, and not the notes.
+- `collect_reports.py` checks the published reports once a day (time, place, values; exact repeats dropped) and rewrites the [`reports` branch](https://github.com/RowanP4069/Brisbane-River-tides/tree/reports), whose README describes the columns. The page's map and list show the last 30 days.
+- To hide a report, add its `submitted_aest` to `data/reports_hidden.csv`. It disappears at the next daily run.
+- Reports are shared under CC BY 4.0.
+
 ## Limitations
 
 The main ones are below. `data/README.md` covers them in full, along with the data sources and how each file was made.
@@ -87,4 +96,4 @@ Built with help from Claude (Anthropic), using Claude Code.
 
 ## Licence
 
-The code (`river_tides.py`, `build_centreline.py`, `collect_gauges.py`, `fetch_bar.py`, `check_parity.py`, `build_gauges.py`, `compare_gauges.py` and `web/`) is under the MIT licence; see [LICENSE](LICENSE). The files in `data/` keep their original CC BY 4.0 licences, as listed above.
+The code (`river_tides.py`, `build_centreline.py`, `collect_gauges.py`, `fetch_bar.py`, `check_parity.py`, `build_gauges.py`, `compare_gauges.py`, `build_report.py`, `collect_reports.py` and `web/`) is under the MIT licence; see [LICENSE](LICENSE). The files in `data/` keep their original CC BY 4.0 licences, as listed above.

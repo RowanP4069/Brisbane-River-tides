@@ -19,7 +19,10 @@ Usage:
 
 Run it after changing the model in either river_tides.py or the template.
 
-It also checks the measured-vs-predicted page (web/compare_template.html): run over all
+It also checks the report page (web/report_template.html): its heightAt(km, time), used
+for the verdict, must match river_tides.heights() at a spread of places and times.
+
+And it checks the measured-vs-predicted page (web/compare_template.html): run over all
 the readings, the page's Stats block must give the same statistics as compare_gauges.py.
 That part needs the gauge-data branch (git fetch origin gauge-data) and is skipped,
 with a note, without it.
@@ -34,6 +37,7 @@ from pathlib import Path
 HERE = Path(__file__).parent
 TEMPLATE = HERE / "web" / "predictions_template.html"
 COMPARE_TEMPLATE = HERE / "web" / "compare_template.html"
+REPORT_TEMPLATE = HERE / "web" / "report_template.html"
 GAUGE_REF = "origin/gauge-data"
 TOLERANCE_M = 0.0005 + 1e-9         # Python rounds to 1 mm
 
@@ -122,6 +126,47 @@ def check_compare(tmp):
     return ["compare page"] if bad else []
 
 
+# Runs the report page's Model block at (km, time) pairs, prints the heights as JSON.
+REPORT_RUNNER = """
+const fs = require("fs");
+const DATA = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+eval(fs.readFileSync(process.argv[3], "utf8"));
+const q = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
+process.stdout.write(JSON.stringify(q.map(([km, t]) => heightAt(km, isoMs(t)))));
+"""
+
+
+def check_report(tmp):
+    """Report page heightAt() vs river_tides.heights(). Returns failures."""
+    import numpy as np
+    import pandas as pd
+    sys.path.insert(0, str(HERE))
+    import build_report
+    from river_tides import DATA, add_corrections, heights, load_bars, load_stations
+    payload = build_report.build_payload(today=pd.Timestamp("2026-11-09"))
+    payload["reports"] = []
+    (tmp / "report.json").write_text(json.dumps(payload))
+    st = load_stations(DATA / "stations.csv")
+    bar_msl = float(st.loc[st.chainage_km == 0, "msl_m"].iloc[0])
+    bar = load_bars(sorted(DATA.glob("bar_*_10min.csv")))
+    kms = [0, 3.3, 12.87, 20.44, 37.0, 44.7, 50.0, 66.8, 75.8]       # stations and between
+    times = pd.date_range("2026-11-08 00:00", "2026-11-12 23:00", freq="97min")
+    pts = add_corrections(pd.DataFrame({"chainage_km": kms}), st)
+    py = heights(bar, times, pts, bar_msl)                             # [time, km]
+    q = [[km, f"{t:%Y-%m-%dT%H:%M}"] for t in times for km in kms]
+    (tmp / "q.json").write_text(json.dumps(q))
+    (tmp / "report_model.js").write_text(model_block(REPORT_TEMPLATE), encoding="utf-8")
+    (tmp / "report_runner.js").write_text(REPORT_RUNNER, encoding="utf-8")
+    js = json.loads(subprocess.run(["node", str(tmp / "report_runner.js"), str(tmp / "report.json"),
+                                    str(tmp / "report_model.js"), str(tmp / "q.json")],
+                                   check=True, capture_output=True, text=True).stdout)
+    worst = float(np.max(np.abs(np.array(js) - py.ravel())))
+    ok = worst <= 1e-9
+    print(f"Report page: {len(js)} heights, largest difference {worst:.1e} m  "
+          f"{'ok' if ok else 'MISMATCH'}")
+    return [] if ok else ["report page"]
+
+
 def main():
     worst_all = 0.0
     failed = []
@@ -159,6 +204,7 @@ def main():
                   f"{worst * 1000:.3f} mm, {n_round} differ after rounding to 1 mm  "
                   f"{'ok' if ok else 'MISMATCH'}")
         failed += check_compare(tmp)
+        failed += check_report(tmp)
     print(f"Largest difference overall: {worst_all * 1000:.3f} mm "
           f"(allowed {TOLERANCE_M * 1000:.1f} mm: Python rounds to 1 mm)")
     if failed:

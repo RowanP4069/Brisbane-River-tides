@@ -2,6 +2,7 @@
 #   https://rowanp4069.github.io/Brisbane-River-tides/             predictions
 #   https://rowanp4069.github.io/Brisbane-River-tides/gauges.html  measured gauges
 #   https://rowanp4069.github.io/Brisbane-River-tides/compare.html measured vs predicted
+#   https://rowanp4069.github.io/Brisbane-River-tides/report.html  report the flow
 # The generated HTML is not committed; each run makes a fresh one.
 #
 # Needs, once: repo Settings -> Pages -> Source: GitHub Actions.
@@ -46,6 +47,8 @@ jobs:
       # The measured readings live on the gauge-data branch; compare_gauges.py reads
       # them from origin/gauge-data (and check_parity.py checks the compare page).
       - run: git fetch --depth=1 origin +refs/heads/gauge-data:refs/remotes/origin/gauge-data
+      # Accepted flow reports, shown on report.html's map.
+      - run: git fetch --depth=1 origin +refs/heads/reports:refs/remotes/origin/reports
       # Stop before publishing if the page's model and river_tides.py disagree.
       # Node.js comes with GitHub's Ubuntu runners.
       - run: python check_parity.py
@@ -57,6 +60,8 @@ jobs:
       - run: python build_gauges.py --stamp --out site/gauges.html
       # Measured vs predicted: the readings saved so far, compared with the model.
       - run: python compare_gauges.py --stamp --out site/compare.html
+      # Report the flow: the form page, with the last 30 days of reports on its map.
+      - run: python build_report.py --stamp --out site/report.html
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site

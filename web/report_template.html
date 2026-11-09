@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report the Flow</title>
+<!-- Same pinned map library as the other pages. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<style>
+  :root { --fg:#1d2329; --muted:#5d6873; --line:#d5dbe0; --bg:#f6f7f8; --panel:#ffffff; --accent:#1f6fb2;
+    --ok:#1e7b3a; --turn:#8a6d00; --off:#a3261b; --up:#1f6fb2; --down:#c0612b; --slack:#6b7580; --swirl:#7b4fa8; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--fg);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding:8px 16px; display:flex; flex-wrap:wrap; gap:4px 16px; align-items:baseline; }
+  header h1 { font-size:17px; margin:0; }
+  /* Links between the pages; the same block is in the other templates. */
+  nav.pages { width:100%; display:flex; flex-wrap:wrap; gap:4px 14px; font-size:13px; }
+  nav.pages a { color:var(--accent); text-decoration:none; }
+  nav.pages a[aria-current] { color:var(--fg); font-weight:600; }
+  main { max-width:760px; margin:0 auto; padding:0 16px 16px; }
+  .intro { margin:4px 0 12px; }
+  section.step { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:0 0 12px; }
+  section.step h2 { font-size:15px; margin:0 0 6px; }
+  section.step h2 .opt { color:var(--muted); font-weight:400; font-size:13px; }
+  #map { height:46vh; min-height:260px; border-radius:6px; position:relative; }
+  #noMap { display:none; gap:8px 12px; flex-wrap:wrap; align-items:center; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:6px 0; }
+  .muted { color:var(--muted); font-size:13px; }
+  #placeText { font-weight:600; }
+  #placeText.bad { color:var(--off); }
+  .choices { display:flex; flex-wrap:wrap; gap:6px; }
+  .choices label { flex:1 1 130px; display:flex; gap:6px; align-items:center; padding:9px 10px; border:1px solid var(--line);
+    border-radius:6px; cursor:pointer; background:var(--bg); }
+  .choices label:has(input:checked) { border-color:var(--accent); background:#e8f1fa; font-weight:600; }
+  .choices input { margin:0; }
+  input[type=text], input[type=number], input[type=datetime-local], textarea { font:inherit; padding:6px 8px;
+    border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--fg); }
+  textarea { width:100%; min-height:60px; }
+  button { font:inherit; padding:8px 14px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; padding:11px 20px; }
+  button:disabled { opacity:.6; cursor:default; }
+  #errors { color:var(--off); font-weight:600; }
+  #result { display:none; }
+  #result .verdict { font-size:18px; font-weight:700; margin:0 0 4px; }
+  #result.match .verdict { color:var(--ok); } #result.turn .verdict { color:var(--turn); }
+  #result.mismatch .verdict { color:var(--off); } #result.none .verdict { color:var(--muted); }
+  .key span { display:inline-block; width:10px; height:10px; border-radius:50%; margin:0 4px 0 10px; vertical-align:-1px; }
+  #recentList { margin:6px 0 0; padding-left:18px; font-size:13px; }
+  footer { max-width:760px; margin:0 auto; padding:6px 16px 14px; font-size:11px; color:var(--muted); }
+  footer p { margin:2px 0; }
+  footer a, main a { color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <nav class="pages"><a href="index.html">Predictions</a><a href="gauges.html">Gauges (measured)</a><a href="compare.html">Measured vs predicted</a><a href="report.html" aria-current="page">Report the flow</a></nav>
+  <h1>Report the flow: which way is the Brisbane River running?</h1>
+</header>
+
+<main>
+<p class="intro">On the river now, or in the last couple of days? Tell us which way the water was flowing and how
+  strongly. Your report goes into a public record that helps work out when the current really turns at each part
+  of the river, which the tide tables don't say. When you send it, this page shows what the tide predictions
+  expected there and then.</p>
+
+<section class="step">
+  <h2>1. Where</h2>
+  <div id="map"></div>
+  <div class="row">
+    <button type="button" id="locate">📍 Use my location</button>
+    <span class="muted" id="mapHint">or tap the river on the map</span>
+  </div>
+  <div class="row" id="noMap">
+    <span class="muted">The map couldn't start in this browser. Use your location, or give the place as distance
+      up the river from the Brisbane Bar:</span>
+    <label>km <input type="number" id="kmIn" min="0" step="0.1" style="width:6em"></label>
+    <select id="bankIn"><option value="mid">mid-river</option><option value="left">left bank (looking downstream)</option>
+      <option value="right">right bank (looking downstream)</option></select>
+  </div>
+  <div id="placeText" class="muted">No place chosen yet.</div>
+</section>
+
+<section class="step">
+  <h2>2. When</h2>
+  <div class="row"><input type="datetime-local" id="when"> <span class="muted">Brisbane time. Now, or up to 2 days ago.</span></div>
+</section>
+
+<section class="step">
+  <h2>3. The flow</h2>
+  <div class="muted">Which way was the water moving? Watch something floating, or the water past a post or buoy.</div>
+  <div class="choices" id="dirChoices">
+    <label><input type="radio" name="dir" value="up"> Upstream ⬆ (inland)</label>
+    <label><input type="radio" name="dir" value="down"> Downstream ⬇ (to the sea)</label>
+    <label><input type="radio" name="dir" value="slack"> Slack (barely moving)</label>
+    <label><input type="radio" name="dir" value="swirl"> Swirling / can't tell</label>
+  </div>
+  <div class="muted" style="margin-top:8px">How strong?</div>
+  <div class="choices" id="strengthChoices">
+    <label><input type="radio" name="strength" value="0"> Slack</label>
+    <label><input type="radio" name="strength" value="1"> Gentle</label>
+    <label><input type="radio" name="strength" value="2"> Moderate</label>
+    <label><input type="radio" name="strength" value="3"> Strong</label>
+    <label><input type="radio" name="strength" value="4"> Very strong</label>
+  </div>
+  <div class="row"><label class="muted">Speed, if you know it <input type="number" id="speed" min="0" max="20" step="0.1" style="width:5em"> km/h</label></div>
+</section>
+
+<section class="step">
+  <h2>4. The water <span class="opt">(optional)</span></h2>
+  <div class="muted">How clear?</div>
+  <div class="choices" id="clarityChoices">
+    <label><input type="radio" name="clarity" value="1"> Very muddy</label>
+    <label><input type="radio" name="clarity" value="2"> Muddy</label>
+    <label><input type="radio" name="clarity" value="3"> Murky</label>
+    <label><input type="radio" name="clarity" value="4"> Fairly clear</label>
+    <label><input type="radio" name="clarity" value="5"> Clear</label>
+  </div>
+  <div class="muted" style="margin-top:8px">Anything else in the water?</div>
+  <div class="choices" id="problemChoices">
+    <label><input type="checkbox" value="debris"> Logs / debris</label>
+    <label><input type="checkbox" value="rubbish"> Rubbish</label>
+    <label><input type="checkbox" value="foam"> Foam / scum</label>
+    <label><input type="checkbox" value="oil"> Oily sheen</label>
+    <label><input type="checkbox" value="algae"> Algae / weed</label>
+    <label><input type="checkbox" value="smell"> Bad smell</label>
+    <label><input type="checkbox" value="dead_fish"> Dead fish</label>
+  </div>
+  <div class="muted" style="margin-top:8px">Notes (not published: only the project sees them)</div>
+  <textarea id="notes" maxlength="1000"></textarea>
+</section>
+
+<section class="step">
+  <h2>5. Send</h2>
+  <div class="row"><label>Name to show <input type="text" id="alias" maxlength="30" placeholder="anonymous"></label></div>
+  <p class="muted">Published: the time, the distance up the river (to 0.1 km) and which bank, your flow and water
+    answers, and the name you give (or "anonymous"). Your exact position and notes are not published. Reports are
+    shared under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. They appear on the map
+    below within about a day.</p>
+  <div id="errors"></div>
+  <button type="button" class="primary" id="send">Send report</button>
+</section>
+
+<section class="step" id="result" aria-live="polite">
+  <p class="verdict" id="verdict"></p>
+  <p id="verdictText"></p>
+  <p class="muted" id="sentText"></p>
+  <button type="button" id="another">Report again</button>
+</section>
+
+<section class="step">
+  <h2>Recent reports <span class="opt" id="recentCount"></span></h2>
+  <div class="muted key">Dots on the map:<span style="background:var(--up)"></span>upstream<span style="background:var(--down)"></span>downstream<span style="background:var(--slack)"></span>slack<span style="background:var(--swirl)"></span>swirling</div>
+  <ul id="recentList"></ul>
+</section>
+
+<details class="step" style="background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px">
+  <summary><b>How the check works</b></summary>
+  <p>The predictions page works out the water <i>level</i> along the river from the Brisbane Bar tide table. A rising
+    level usually means water coming in from the bay (flowing upstream), a falling level water going out
+    (downstream). Within about 45 minutes of predicted high or low water the flow is turning, so anything is
+    plausible then.</p>
+  <p>A report that doesn't match is not a mistake: it's exactly the kind of data this is for. The current usually
+    keeps running for a while after the level turns, and rain upstream adds a downstream flow that can outlast the
+    incoming tide. Collecting reports shows how long those lags are at each part of the river.</p>
+</details>
+</main>
+
+<footer>
+  <p><b>Not for navigation.</b> Look after your own safety on the water.</p>
+  <p>Tide predictions: Brisbane Bar predictions and tidal planes © State of Queensland (Maritime Safety Queensland),
+    CC BY 4.0. River centreline: Watercourse lines - Queensland © State of Queensland (Department of Resources),
+    CC BY 4.0. Basemap attribution on the map.</p>
+  <p id="built" hidden></p>
+</footer>
+
+<script>
+"use strict";
+// ---- Data, inlined by build_report.py ----------------------------------------------
+const DATA = /*__DATA__*/null;
+const $ = id => document.getElementById(id);
+
+// ---- Model: BEGIN (check_parity.py runs this block in Node, so keep it self-contained:
+// it may use only DATA and what it defines itself) ----------------------------------
+// height(km, t) = MSL(km) + ratio(km) * (Bar(t - lag(km)) - MSL_Bar), as river_tides.py,
+// with lag, ratio and MSL interpolated along the river between stations as
+// add_corrections() does. Times are naive AEST read as if UTC.
+const M = DATA.model;
+const MIN_MS = 60000, DAY_MS = 86400000;
+const isoMs = iso => Date.parse(iso.slice(0, 16) + ":00Z");     // "YYYY-MM-DDTHH:MM"
+const msIso = ms => new Date(ms).toISOString().slice(0, 16);
+const BAR_T0 = isoMs(M.bar_start), BAR_N = M.bar_mm.length, BAR_STEP_MS = M.bar_step_min * MIN_MS;
+function barAnomaly(ms) {            // Bar minus MSL_Bar, linear between readings; NaN outside
+  const x = (ms - BAR_T0) / BAR_STEP_MS, j = Math.floor(x);
+  if (!(x >= 0 && x <= BAR_N - 1)) return NaN;
+  const a = M.bar_mm[j] / 1000 - M.bar_msl_m;
+  if (j === BAR_N - 1) return a;
+  const b = M.bar_mm[j + 1] / 1000 - M.bar_msl_m;
+  return a + (b - a) * (x - j);
+}
+function interp(x, xs, ys) {         // as np.interp: linear, held at the ends
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[xs.length - 1]) return ys[ys.length - 1];
+  let j = 1;
+  while (xs[j] < x) j++;
+  return ys[j - 1] + (ys[j] - ys[j - 1]) * (x - xs[j - 1]) / (xs[j] - xs[j - 1]);
+}
+function heightAt(km, ms) {          // m above local LAT
+  const lag = interp(km, M.km, M.lag_min), ratio = interp(km, M.km, M.ratio), msl = interp(km, M.km, M.msl_m);
+  return msl + ratio * barAnomaly(ms - lag * MIN_MS);
+}
+// ---- Model: END --------------------------------------------------------------------
+
+// ---- The tide at a place and time -----------------------------------------------------
+const TURN_MIN = 45;                 // within this of high/low water = "near the turn"
+// Rising or falling at (km, ms), and the nearest predicted high or low water within 8 h
+// (scanned every 2 minutes; the top is flat enough that 2 min is plenty).
+function tideState(km, ms) {
+  const h = t => heightAt(km, t);
+  const d = h(ms + 5 * MIN_MS) - h(ms - 5 * MIN_MS);
+  if (!Number.isFinite(d)) return null;
+  const step = 2 * MIN_MS, ts = [], hs = [];
+  for (let t = ms - 8 * 3600000; t <= ms + 8 * 3600000; t += step) { ts.push(t); hs.push(h(t)); }
+  let turn = null;
+  for (let i = 1; i < hs.length - 1; i++) {
+    const kind = hs[i] > hs[i - 1] && hs[i] >= hs[i + 1] ? "high" : hs[i] < hs[i - 1] && hs[i] <= hs[i + 1] ? "low" : null;
+    if (kind && (!turn || Math.abs(ts[i] - ms) < Math.abs(turn.ms - ms))) turn = { kind, ms: ts[i] };
+  }
+  return { rising: d > 0, turn, minFromTurn: turn ? (ms - turn.ms) / MIN_MS : null };
+}
+const fmtMin = m => { m = Math.round(Math.abs(m)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+// Verdict for a reported direction: "match" | "turn" | "mismatch" | "none", with words.
+function verdictFor(dir, st) {
+  if (!st) return { v: "none", head: "Can't compare", text: "The predictions loaded in this page don't cover that time." };
+  const nearTurn = st.turn && Math.abs(st.minFromTurn) <= TURN_MIN;
+  const turnWords = st.turn ? `Predicted ${st.turn.kind} water there was ${fmtMin(st.minFromTurn)} `
+    + `${st.minFromTurn >= 0 ? "before" : "after"} your time.` : "";
+  const expect = st.rising ? "rising, so water coming in: upstream" : "falling, so water going out: downstream";
+  if (nearTurn) return { v: "turn", head: "Near the turn",
+    text: `${turnWords} Around high or low water the flow is turning, so slack, either direction or swirling are all plausible. Reports like this pin down when it actually turns.` };
+  if (dir === "swirl") return { v: "none", head: "Noted",
+    text: `The level was predicted to be ${expect}. ${turnWords} Swirling water is common near bends, bridges and creek mouths.` };
+  const want = st.rising ? "up" : "down";
+  if (dir === want) return { v: "match", head: "Matches the prediction",
+    text: `The level was predicted to be ${expect}. ${turnWords}` };
+  return { v: "mismatch", head: "Doesn't match: useful data!",
+    text: `The level was predicted to be ${expect}, but you saw ${dir === "slack" ? "slack water" : dir === "up" ? "upstream flow" : "downstream flow"}. ${turnWords} `
+      + "That happens: the current usually turns some time after the level does, and rain upstream pushes water downstream. Your report helps measure exactly that." };
+}
+
+// ---- Place: snap to the river centreline ---------------------------------------------
+const R = DATA.river;
+// Nearest point on the centreline: { km, off (m), bank }, as build_gauges.project_onto(),
+// in a flat local projection. Bank as seen looking downstream; "mid" within 30 m.
+function snap(lon, lat) {
+  const kx = 111320 * Math.cos(lat * Math.PI / 180), ky = 110540;
+  let best = { off: Infinity };
+  for (let i = 0; i < R.lon.length - 1; i++) {
+    const ax = (R.lon[i] - lon) * kx, ay = (R.lat[i] - lat) * ky, bx = (R.lon[i + 1] - lon) * kx, by = (R.lat[i + 1] - lat) * ky;
+    const dx = bx - ax, dy = by - ay, seg2 = dx * dx + dy * dy;
+    const t = seg2 === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / seg2));
+    const qx = ax + t * dx, qy = ay + t * dy, off = Math.hypot(qx, qy);
+    if (off < best.off) {
+      // Downstream is from b (further up) to a. The point (0,0) is left of that direction
+      // if the cross product is positive.
+      const cross = (-dx) * (0 - qy) - (-dy) * (0 - qx);
+      best = { off, km: R.km[i] + t * (R.km[i + 1] - R.km[i]), bank: off < 30 ? "mid" : cross > 0 ? "left" : "right" };
+    }
+  }
+  return best;
+}
+const lonLatAt = km => [interp(km, R.km, R.lon), interp(km, R.km, R.lat)];
+const KM_MAX = DATA.meta.km_max, MAX_OFF = DATA.meta.max_off_m;
+const BANK_WORDS = { mid: "mid-river", left: "left bank (looking downstream)", right: "right bank (looking downstream)" };
+const place = { lon: null, lat: null, km: null, off: null, bank: null };
+function setPlace(lon, lat) {
+  const s = snap(lon, lat);
+  Object.assign(place, { lon, lat, km: s.km, off: s.off, bank: s.bank });
+  showPlace();
+  if (marker) marker.setLngLat([lon, lat]).addTo(map);
+}
+function showPlace() {
+  const el = $("placeText");
+  if (place.km === null) { el.textContent = "No place chosen yet."; el.className = "muted"; return; }
+  const bad = placeProblem();
+  el.className = bad ? "bad" : "";
+  el.textContent = bad || `${place.km.toFixed(1)} km up the river from the Brisbane Bar, ${BANK_WORDS[place.bank]}`
+    + (place.off !== null ? ` (${Math.round(place.off)} m from mid-river).` : ".");
+}
+function placeProblem() {
+  if (place.km === null) return "Choose a place: tap the river, or use your location.";
+  if (place.off !== null && place.off > MAX_OFF) return `That's ${Math.round(place.off)} m from the river. Tap on the water, or move closer.`;
+  if (place.km > KM_MAX + 0.2) return `That's above Kholo Creek (km ${KM_MAX.toFixed(1)}), where the predictions stop.`;
+  return null;
+}
+$("locate").addEventListener("click", () => {
+  if (!navigator.geolocation) { $("placeText").textContent = "This browser can't give your location."; return; }
+  $("placeText").textContent = "Finding you…";
+  navigator.geolocation.getCurrentPosition(
+    p => { setPlace(p.coords.longitude, p.coords.latitude); if (map) map.easeTo({ center: [p.coords.longitude, p.coords.latitude], zoom: 14 }); },
+    e => { $("placeText").textContent = `Couldn't get your location (${e.message}).`; $("placeText").className = "bad"; },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+});
+function useKm() {                   // the no-map fallback
+  const km = parseFloat($("kmIn").value);
+  if (!Number.isFinite(km)) return;
+  Object.assign(place, { lon: null, lat: null, km: Math.max(0, km), off: null, bank: $("bankIn").value });
+  showPlace();
+}
+$("kmIn").addEventListener("input", useKm);
+$("bankIn").addEventListener("change", useKm);
+
+// ---- Map ----------------------------------------------------------------------------
+const COLOURS = { up: "#1f6fb2", down: "#c0612b", slack: "#6b7580", swirl: "#7b4fa8" };
+let map = null, marker = null;
+try {
+  map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/positron",
+    center: [152.99, -27.49], zoom: 10.3 });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+  marker = new maplibregl.Marker({ color: "#c0392b" });
+  map.on("click", e => setPlace(e.lngLat.lng, e.lngLat.lat));
+  map.on("load", () => {
+    map.addSource("river", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString",
+      coordinates: R.lon.map((x, i) => [x, R.lat[i]]) } } });
+    map.addLayer({ id: "river", type: "line", source: "river", paint: { "line-color": "#1f6fb2", "line-width": 2, "line-opacity": .5 } });
+    map.addSource("reports", { type: "geojson", data: { type: "FeatureCollection", features: DATA.reports.map((r, i) => ({
+      type: "Feature", id: i, properties: { i, colour: COLOURS[r.dir] || "#888" }, geometry: { type: "Point", coordinates: lonLatAt(r.km) } })) } });
+    map.addLayer({ id: "reports", type: "circle", source: "reports", paint: { "circle-radius": 6, "circle-color": ["get", "colour"],
+      "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } });
+    map.on("click", "reports", e => {
+      const r = DATA.reports[e.features[0].properties.i];
+      new maplibregl.Popup().setLngLat(e.lngLat).setText(reportLine(r)).addTo(map);
+    });
+  });
+} catch (err) {
+  console.error("Map unavailable:", err);
+  map = null; marker = null;
+  $("map").style.display = "none";
+  $("mapHint").textContent = "";
+  $("noMap").style.display = "flex";
+}
+
+// ---- Time -------------------------------------------------------------------------
+// Brisbane is UTC+10 with no daylight saving.
+const brisbaneNow = () => Math.floor((Date.now() + 10 * 3600000) / MIN_MS) * MIN_MS;
+function resetWhen() {
+  const now = brisbaneNow();
+  $("when").value = msIso(now); $("when").max = msIso(now); $("when").min = msIso(now - 2 * DAY_MS);
+}
+resetWhen();
+
+// ---- Recent reports -----------------------------------------------------------------
+const DIR_WORDS = { up: "upstream", down: "downstream", slack: "slack", swirl: "swirling" };
+const STRENGTH_WORDS = ["slack", "gentle", "moderate", "strong", "very strong"];
+const fmtWhen = iso => new Date(isoMs(iso)).toLocaleString("en-AU", { timeZone: "UTC", weekday: "short", day: "numeric",
+  month: "short", hour: "numeric", minute: "2-digit" });
+const reportLine = r => `${fmtWhen(r.time)}, km ${r.km.toFixed(1)}: ${DIR_WORDS[r.dir] || r.dir}`
+  + `${r.dir === "slack" || r.dir === "swirl" ? "" : ", " + STRENGTH_WORDS[r.strength]} (${r.alias || "anonymous"})`;
+$("recentCount").textContent = `(last ${DATA.meta.report_days} days: ${DATA.reports.length})`;
+for (const r of DATA.reports.slice(0, 10)) {
+  const li = document.createElement("li"); li.textContent = reportLine(r); $("recentList").appendChild(li);
+}
+if (!DATA.reports.length) $("recentList").innerHTML = "<li>None yet. Be the first!</li>";
+
+// ---- Send ---------------------------------------------------------------------------
+const picked = name => { const el = document.querySelector(`input[name=${name}]:checked`); return el ? el.value : null; };
+// Slack direction means slack strength.
+document.querySelectorAll("input[name=dir]").forEach(el => el.addEventListener("change", () => {
+  if (el.checked && el.value === "slack") document.querySelector("input[name=strength][value='0']").checked = true;
+}));
+function problems() {
+  const out = [];
+  const t = $("when").value, ms = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t) ? isoMs(t) : NaN, now = brisbaneNow();
+  const p = placeProblem(); if (p) out.push(p);
+  if (!Number.isFinite(ms)) out.push("Give the time.");
+  else if (ms > now + 5 * MIN_MS) out.push("The time is in the future.");
+  else if (ms < now - 2 * DAY_MS) out.push("The time is more than 2 days ago.");
+  if (!picked("dir")) out.push("Choose which way the water was moving.");
+  if (!picked("strength") && picked("dir") !== "swirl") out.push("Choose how strong the flow was.");
+  return out;
+}
+// The published part of the report: no coordinates, km to 0.1, distance from mid-river
+// to the nearest 50 m (so the daily job can recheck it). Version 1.
+function buildReport(ms, verdict) {
+  const speed = parseFloat($("speed").value), clarity = picked("clarity");
+  return { v: 1, time: msIso(ms), km: Math.round(place.km * 10) / 10, bank: place.bank,
+    off_m: place.off === null ? null : Math.round(place.off / 50) * 50,
+    alias: $("alias").value.trim().slice(0, 30), dir_kind: "river", dir: picked("dir"),
+    strength: picked("strength") === null ? null : +picked("strength"),
+    speed_kmh: Number.isFinite(speed) ? Math.round(speed * 10) / 10 : null,
+    clarity: clarity === null ? null : +clarity,
+    problems: [...document.querySelectorAll("#problemChoices input:checked")].map(e => e.value),
+    verdict };
+}
+$("send").addEventListener("click", async () => {
+  const errs = problems();
+  $("errors").textContent = errs.join(" ");
+  if (errs.length) return;
+  const ms = isoMs($("when").value), st = tideState(place.km, ms), ver = verdictFor(picked("dir"), st);
+  const report = buildReport(ms, ver.v);
+  const priv = { lat: place.lat, lon: place.lon, off_m: place.off === null ? null : Math.round(place.off),
+    notes: $("notes").value.trim().slice(0, 1000) };
+  $("send").disabled = true;
+  let sent;
+  if (!DATA.form.action) sent = "Test mode: this page isn't connected to the report store yet, so nothing was sent.";
+  else {
+    try {
+      // Google Forms doesn't allow reading its reply from another site ("no-cors"), so
+      // the page can't confirm the report arrived, only that it was sent.
+      await fetch(DATA.form.action, { method: "POST", mode: "no-cors",
+        body: new URLSearchParams({ [DATA.form.report]: JSON.stringify(report), [DATA.form.private]: JSON.stringify(priv) }) });
+      sent = "Sent, thank you! It will appear on the map within about a day.";
+    } catch (e) {
+      sent = "Couldn't send it (no connection?). Try again in a moment.";
+      $("send").disabled = false;
+    }
+  }
+  $("result").className = "step " + ver.v;
+  $("result").style.display = "block";
+  $("verdict").textContent = ver.head;
+  $("verdictText").textContent = ver.text;
+  $("sentText").textContent = sent;
+  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+$("another").addEventListener("click", () => {
+  $("result").style.display = "none"; $("send").disabled = false; resetWhen();
+  document.querySelectorAll("input[name=dir], input[name=strength]").forEach(el => { el.checked = false; });
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+if (DATA.meta.built) {
+  $("built").textContent = `Page built ${fmtWhen(DATA.meta.built)} AEST.`;
+  $("built").hidden = false;
+}
+</script>
+</body>
+</html>
