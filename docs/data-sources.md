@@ -73,6 +73,19 @@ Listed on <https://www.msq.qld.gov.au/tides/open-data>. All are CC BY 4.0 and in
 - **Pinkenba (Gateway Bridge) archived measured data:** 10-minute, yearly up to 2025, in the datastore. MSQ has no near-real-time feed for Pinkenba.
 - **Official predictions for Pinkenba and Port Office:** 10-minute series, also in the datastore. Port Office 2026 is resource `68b27a91-0163-4872-8433-d2765f6f670d`. These give us a free check of our own model at two places.
 
+### Queensland Government storm tide monitoring (Coastal Data System)
+
+Checked 2026-11-09, after seeing the Pinkenba Wharf chart embedded on a third-party site.
+
+- **Live charts:** `https://apps.des.qld.gov.au/waves/graphs/<site>_tide.png`, 600×480 images showing actual, predicted and residual levels in m above LAT, with AHD and HAT marked. They're redrawn hourly. There's one for **Brisbane River (Pinkenba Wharf)**, `pinkenbawharf_tide.png`.
+- **Pinkenba is a chart only.** There's no data file for it: it isn't in either CSV feed below, and it has no site page under qld.gov.au/tides (guessed URLs return 404, and directory listings return 403). The only Pinkenba data stays the yearly archive above. Reading values off the image would be fragile, so it isn't worth doing. If live Pinkenba matters later, ask the Coastal Impacts Unit whether `pinkenbawharf` could be added to the CSV feed.
+- **Two 7-day CSV feeds** (CC BY 4.0, data.qld.gov.au "Coastal Data System – Near real time tide data" and "… storm tide data"):
+  - `https://apps.des.qld.gov.au/data-sets/storm-tides/stdtide-7dayopdata.csv`, 24 sites
+  - `https://apps.des.qld.gov.au/data-sets/storm-tides/tide-7dayopdata.csv`, 61 sites
+  - Columns: `Site, Seconds, DateTime, Water Level, Prediction, Residual, Latitude, Longitude`. 10-minute steps, last 7 days, DateTime in AEST (checked against Seconds), m above LAT.
+  - Near Brisbane: `whyteislandnx` (Brisbane Bar), plus the Moreton Bay sites `shorncliffe`, `scarborough`, `tangalooma`, `rabybay`, `birkdale`, `bananabank`, `goldcoast`, `coombabahst` and `goldenbeach`.
+  - **Useful for:** the official residual at the Bar (a check on our weather baseline), and measured levels across Moreton Bay for roadmap item 15. Like the BCC data, it's only kept for 7 days, so archiving it would mean adding it to `collect_gauges.py`.
+
 ### Queensland water monitoring (WMIP), upstream gauges
 
 - **Web service:** `https://water-monitoring.information.qld.gov.au/cgi/webservice.exe` (Kisters Hydstra JSON). It returns `"licence":"CC_40_BY"`.
