@@ -22,6 +22,12 @@ Checks (a report failing any is left out, and counted in the printout):
   - no exact repeat of an accepted report (double taps)
 Aliases are trimmed to 30 characters; one containing a web address is blanked.
 
+Each report from the page also carries "device": the first 8 hex characters of a random
+ID the page keeps in the browser's local storage (blank for reports sent before
+2026-11-10). It groups reports sent from the same device. A row in the hidden list hides
+the report with that submission time, or, when its device column is filled in, every
+report from that device.
+
 Usage:
   python collect_reports.py --out DIR         # DIR: a checkout of the reports branch
   python collect_reports.py --out DIR --csv FILE   # test with a saved copy of the CSV
@@ -46,7 +52,7 @@ PUBLIC_CSV = ("https://docs.google.com/spreadsheets/d/e/2PACX-1vRREHLIOYMjz8rcYs
 HIDDEN_CSV = HERE / "data" / "reports_hidden.csv"
 
 FIELDS = ["submitted_aest", "time_aest", "km", "bank", "alias", "dir_kind", "dir", "strength",
-          "speed_kmh", "clarity", "problems", "verdict"]
+          "speed_kmh", "clarity", "problems", "verdict", "device"]
 DIRS = {"up", "down", "slack", "swirl"}
 BANKS = {"mid", "left", "right"}
 PROBLEMS = {"debris", "rubbish", "foam", "oil", "algae", "smell", "dead_fish"}
@@ -83,12 +89,17 @@ def fetch_csv(url, hops=3):
     raise SystemExit(f"Too many redirects from {url}")
 
 
-def hidden_times():
-    """Submission times (as in the CSV) of reports hidden by hand."""
-    if not HIDDEN_CSV.exists():
-        return set()
-    with HIDDEN_CSV.open(newline="") as f:
-        return {r["submitted_aest"].strip() for r in csv.DictReader(f)}
+def hidden_lists():
+    """Submission times (as in the CSV) and device codes of reports hidden by hand."""
+    times, devices = set(), set()
+    if HIDDEN_CSV.exists():
+        with HIDDEN_CSV.open(newline="") as f:
+            for r in csv.DictReader(f):
+                if (r.get("device") or "").strip():
+                    devices.add(r["device"].strip().lower())
+                elif (r.get("submitted_aest") or "").strip():
+                    times.add(r["submitted_aest"].strip())
+    return times, devices
 
 
 def is_num(x, lo, hi):
@@ -136,6 +147,9 @@ def check(submitted, raw):
         return "bad problems list"
     if r.get("verdict") not in VERDICTS:
         return "bad verdict"
+    device = r.get("device")
+    if device is not None and not (isinstance(device, str) and re.fullmatch(r"[0-9a-f]{8}", device)):
+        return "bad device"
     alias = re.sub(r"[\x00-\x1f\x7f]", "", str(r.get("alias") or "")).strip()[:30]
     if re.search(r"https?:|www\.|\.(com|net|org|au)\b", alias, re.I):
         alias = ""
@@ -144,7 +158,7 @@ def check(submitted, raw):
             "dir_kind": "river", "dir": r["dir"], "strength": "" if s is None else str(s),
             "speed_kmh": "" if r.get("speed_kmh") is None else f"{r['speed_kmh']:.1f}",
             "clarity": "" if c is None else str(c), "problems": ";".join(sorted(p)),
-            "verdict": r["verdict"]}
+            "verdict": r["verdict"], "device": device or ""}
 
 
 def main():
@@ -155,18 +169,19 @@ def main():
 
     text = Path(args.csv).read_text() if args.csv else fetch_csv(PUBLIC_CSV)
     rows = list(csv.DictReader(io.StringIO(text)))
-    hidden = hidden_times()
+    hidden, hidden_devices = hidden_lists()
+    is_hidden = lambda r: r["submitted_aest"] in hidden or (r.get("device") or "") in hidden_devices
     accepted, rejected, seen = [], {}, set()
     for row in rows:
         sub, raw = row.get("submitted_aest", "").strip(), row.get("report", "")
         if not sub:
             continue
-        if sub in hidden:
-            rejected["hidden by hand"] = rejected.get("hidden by hand", 0) + 1
-            continue
         res = check(sub, raw)
         if isinstance(res, str):
             rejected[res] = rejected.get(res, 0) + 1
+            continue
+        if is_hidden(res):
+            rejected["hidden by hand"] = rejected.get("hidden by hand", 0) + 1
             continue
         key = tuple(v for k, v in res.items() if k != "submitted_aest")
         if key in seen:
@@ -188,14 +203,14 @@ def main():
         old.unlink()                     # rewritten in full below
     n_saved = len(saved)
     saved.update({ident(r): r for r in accepted})
-    keep = [r for r in saved.values() if r["submitted_aest"] not in hidden]
+    keep = [r for r in saved.values() if not is_hidden(r)]
     print(f"{n_saved} reports already saved, {len(keep)} after this run")
     by_month = {}
     for r in sorted(keep, key=lambda r: (r["time_aest"], r["submitted_aest"])):
         by_month.setdefault(r["time_aest"][:7], []).append(r)
     for month, rs in by_month.items():
         with (folder / f"{month}.csv").open("w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=FIELDS, lineterminator="\n")
+            w = csv.DictWriter(f, fieldnames=FIELDS, lineterminator="\n", restval="")
             w.writeheader()
             w.writerows(rs)
     print(f"{len(rows)} rows: {len(accepted)} accepted"

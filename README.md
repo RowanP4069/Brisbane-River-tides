@@ -71,7 +71,8 @@ A fourth page, **Report the flow**, lets people on the river report which way th
 - `collect_reports.py` checks the published reports once a day (time, place, values; exact repeats dropped) and rewrites the [`reports` branch](https://github.com/RowanP4069/Brisbane-River-tides/tree/reports), whose README describes the columns. The page's map and list show the last 30 days.
 - The map shows public boat ramps (`data/ramps.csv`, from Brisbane City Council and MSQ's Beacon to Beacon guide) as places to find; tapping one sets the report's place.
 - Above Kholo Creek, where the tide tables stop, reports are recorded without a verdict.
-- To hide a report, add its `submitted_aest` to `data/reports_hidden.csv`. It disappears at the next daily run.
+- The page remembers the reporter's name in the browser (local storage, not a cookie) and gives each device a random ID. Reports publish its first 8 characters as `device`, so reports from one device can be grouped; the private part keeps the whole ID. Nothing about the person or their IP address is stored.
+- To hide a report, add its `submitted_aest` to `data/reports_hidden.csv`; to hide every report from a device, fill in the `device` column instead. They disappear at the next daily run.
 - Reports are shared under CC BY 4.0.
 
 ## Limitations

@@ -138,7 +138,9 @@
   <h2>5. Send</h2>
   <div class="row"><label>Name to show <input type="text" id="alias" maxlength="30" placeholder="anonymous"></label></div>
   <p class="muted">Published: the time, the distance up the river (to 0.1 km) and which bank, your flow and water
-    answers, and the name you give (or "anonymous"). Your exact position and notes are not published. Reports are
+    answers, the name you give (or "anonymous"), and a short code for this device. Your exact position and notes are
+    not published. This browser remembers your name and a random device ID (not a cookie, and nothing about you), so
+    reports from the same device can be grouped; clearing this site's data resets them. Reports are
     shared under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. They appear on the map
     below within about a day.</p>
   <div id="errors"></div>
@@ -404,6 +406,27 @@ for (const r of DATA.reports.slice(0, 10)) {
 }
 if (!DATA.reports.length) $("recentList").innerHTML = "<li>None yet. Be the first!</li>";
 
+// ---- Remembered on this device -------------------------------------------------------
+// The name and a random device ID live in this browser's local storage (not a cookie:
+// nothing is sent until a report is). The ID is random, so it says nothing about the
+// person; the report publishes its first 8 characters so reports from one device can be
+// grouped (and hidden together), and the private part has the whole ID. Storage can be
+// blocked (private windows), so every use is guarded and the page works without it.
+const store = {
+  get(k) { try { return localStorage.getItem("brt." + k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem("brt." + k, v); } catch (e) { /* not kept */ } },
+};
+function deviceId() {
+  let id = store.get("device");
+  if (!/^[0-9a-f]{32}$/.test(id || "")) {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    id = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+    store.set("device", id);
+  }
+  return id;
+}
+$("alias").value = store.get("alias") || "";
+
 // ---- Send ---------------------------------------------------------------------------
 const picked = name => { const el = document.querySelector(`input[name=${name}]:checked`); return el ? el.value : null; };
 // Slack direction means slack strength.
@@ -423,7 +446,7 @@ function problems() {
 }
 // The published part of the report: no coordinates, km to 0.1, distance from mid-river
 // to the nearest 50 m (so the daily job can recheck it). Version 1.
-function buildReport(ms, verdict) {
+function buildReport(ms, verdict, device) {
   const speed = parseFloat($("speed").value), clarity = picked("clarity");
   return { v: 1, time: msIso(ms), km: Math.round(place.km * 10) / 10, bank: place.bank,
     off_m: place.off === null ? null : Math.round(place.off / 50) * 50,
@@ -432,16 +455,17 @@ function buildReport(ms, verdict) {
     speed_kmh: Number.isFinite(speed) ? Math.round(speed * 10) / 10 : null,
     clarity: clarity === null ? null : +clarity,
     problems: [...document.querySelectorAll("#problemChoices input:checked")].map(e => e.value),
-    verdict };
+    verdict, device: device.slice(0, 8) };
 }
 $("send").addEventListener("click", async () => {
   const errs = problems();
   $("errors").textContent = errs.join(" ");
   if (errs.length) return;
   const ms = isoMs($("when").value), st = tideState(place.km, ms), ver = verdictFor(picked("dir"), st, place.km);
-  const report = buildReport(ms, ver.v);
+  const device = deviceId(), report = buildReport(ms, ver.v, device);
   const priv = { lat: place.lat, lon: place.lon, off_m: place.off === null ? null : Math.round(place.off),
-    notes: $("notes").value.trim().slice(0, 1000) };
+    notes: $("notes").value.trim().slice(0, 1000), device };
+  store.set("alias", report.alias);
   $("send").disabled = true;
   let sent;
   if (!DATA.form.action) sent = "Test mode: this page isn't connected to the report store yet, so nothing was sent.";
