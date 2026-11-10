@@ -74,6 +74,7 @@ A fourth page, **Report the flow**, lets people on the river report which way th
 - The page remembers the reporter's name in the browser (local storage, not a cookie) and gives each device a random ID. Reports publish its first 8 characters as `device`, so reports from one device can be grouped; the private part keeps the whole ID. Nothing about the person or their IP address is stored.
 - To hide a report, add its `submitted_aest` to `data/reports_hidden.csv`; to hide every report from a device, fill in the `device` column instead. They disappear at the next daily run.
 - Reports are shared under CC BY 4.0.
+- [docs/report-form-setup.md](docs/report-form-setup.md) says how the Google Form and its sheet are set up, to check or rebuild them.
 
 ## Limitations
 

@@ -49,7 +49,8 @@ from river_tides import (BRISBANE, DATA, HERE, load_bars, load_stations, station
 # still works and gives its verdict, but says the report wasn't sent.
 # The form "Brisbane River flow reports" and its sheet "... (responses)" are in the
 # project owner's Google Drive (made 2026-11-09). Only the sheet's "public" tab
-# (timestamp + report) is published; see collect_reports.py.
+# (timestamp + report) is published; see collect_reports.py. How to set them up, and
+# find the entry IDs: docs/report-form-setup.md.
 FORM = {
     "action": ("https://docs.google.com/forms/d/e/"
                "1FAIpQLSc8ZxLPodpPoqbuS8zEGNjmZST4Zvy_3jZ42CWEjcybiE0kig/formResponse"),
