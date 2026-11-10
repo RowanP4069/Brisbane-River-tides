@@ -20,6 +20,7 @@ This branch holds **data only**: reports of which way the Brisbane River was flo
 | clarity | 1 very muddy to 5 clear, if given |
 | problems | `;`-separated: debris, rubbish, foam, oil, algae, smell, dead_fish |
 | verdict | what the page told the reporter: `match`, `turn` (near high/low water), `mismatch`, `none` |
+| device | the first 8 characters of a random ID kept in the reporter's browser, so reports from the same device can be grouped (blank for reports sent before 2026-11-10). It says nothing about the person or their IP address. |
 
 Exact positions and notes are not published.
 
