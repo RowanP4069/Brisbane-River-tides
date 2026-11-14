@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report the Flow: Results</title>
+<!-- Same pinned map library as the other pages. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<style>
+  :root { --fg:#1d2329; --muted:#5d6873; --line:#d5dbe0; --bg:#f6f7f8; --panel:#ffffff; --accent:#1f6fb2;
+    /* Verdict colours: text versions as on the report page; mark versions for dots and
+       symbols (checked for colour-blind separation; always shown with a label too). */
+    --ok:#1e7b3a; --turn:#8a6d00; --off:#a3261b;
+    --m-match:#1e7b3a; --m-turn:#c99a00; --m-mismatch:#a3261b; --m-none:#9aa3ab;
+    --own:#5b3fa8;            /* the project's own field observations and hypotheses */
+    --lim-msq:#c99a00; --lim-kholo:#a3261b; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--fg);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding:8px 16px; display:flex; flex-wrap:wrap; gap:4px 16px; align-items:baseline; }
+  header h1 { font-size:17px; margin:0; }
+  /* Links between the pages; the same block is in the other templates. */
+  nav.pages { width:100%; display:flex; flex-wrap:wrap; gap:4px 14px; font-size:13px; }
+  nav.pages a { color:var(--accent); text-decoration:none; }
+  nav.pages a[aria-current] { color:var(--fg); font-weight:600; }
+  main { max-width:900px; margin:0 auto; padding:0 16px 16px; }
+  .intro { margin:4px 0 12px; }
+  section.card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:0 0 12px; }
+  section.card h2 { font-size:15px; margin:0 0 6px; }
+  .muted { color:var(--muted); font-size:13px; }
+  #summary { font-size:16px; margin:0 0 12px; }
+  #map { height:52vh; min-height:280px; border-radius:6px; }
+  #noMap { display:none; }
+  .legend { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:13px; margin:8px 0 0; align-items:center; }
+  .legend span { display:inline-flex; gap:5px; align-items:center; }
+  .sw { width:12px; height:12px; border-radius:50%; display:inline-block; border:1.5px solid #fff; box-shadow:0 0 0 1px #0003; }
+  .sw.dia { border-radius:1px; transform:rotate(45deg); width:10px; height:10px; }
+  .sw.line { width:18px; height:0; border:0; border-top:3px dashed; border-radius:0; box-shadow:none; }
+  .sw.band { width:18px; height:10px; border-radius:2px; border:0; box-shadow:none; }
+  .scroll { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-weight:600; color:var(--muted); white-space:nowrap; }
+  #reachTable td:first-child { min-width:170px; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  tr.zone td { background:var(--bg); font-weight:600; border-top:2px solid var(--line); }
+  tr.zone td .muted { font-weight:400; }
+  .v-match { color:var(--ok); font-weight:600; } .v-turn { color:var(--turn); font-weight:600; }
+  .v-mismatch { color:var(--off); font-weight:600; } .v-none { color:var(--muted); }
+  .own { color:var(--own); font-weight:600; }
+  #chart { width:100%; height:auto; display:block; touch-action:pan-y; }
+  #chart text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill:var(--muted); }
+  #chart .grid { stroke:#e6eaed; stroke-width:1; }
+  #chart .axis { stroke:#b9c1c8; stroke-width:1; }
+  #chart .mk { stroke:#fff; stroke-width:1.5; cursor:default; }
+  #chart .mk:hover { stroke:var(--fg); }
+  #tip { position:fixed; pointer-events:none; background:var(--fg); color:#fff; font-size:12px; padding:5px 8px;
+    border-radius:4px; max-width:280px; display:none; z-index:10; }
+  .hyp h3 { font-size:14px; margin:0 0 4px; }
+  .tally { font-weight:600; }
+  footer { max-width:900px; margin:0 auto; padding:6px 16px 14px; font-size:11px; color:var(--muted); }
+  footer p { margin:2px 0; }
+  footer a, main a { color:var(--accent); }
+  .maplibregl-popup-content { font-size:13px; max-width:280px; }
+</style>
+</head>
+<body>
+<header>
+  <nav class="pages"><a href="index.html">Height predictions</a><a href="gauges.html">Gauges (measured)</a><a href="compare.html">Measured vs predicted</a><a href="report.html">Report the flow</a><a href="results.html" aria-current="page">Report the flow (results)</a></nav>
+  <h1>Report the flow (results): what has been seen on the river so far</h1>
+</header>
+
+<main>
+<p class="intro">Every flow report sent from the <a href="report.html">Report the flow</a> page, together with the
+  project's own field observations, checked against the predictions where there are predictions to check against.
+  It grows as reports come in. Below Kholo Creek the predictions are of water <b>height</b>; a report of the flow is
+  compared with whether the level was predicted to be rising (flow upstream) or falling (flow downstream).</p>
+<p id="summary"></p>
+
+<section class="card">
+  <h2>Map</h2>
+  <div id="map"></div>
+  <p id="noMap" class="muted">The map couldn't load here. The tables below have everything on it.</p>
+  <div class="legend" id="mapLegend"></div>
+  <p class="muted">Tap a dot or a line for details. Reports at the same place sit on top of each other: a tap lists them all.</p>
+</section>
+
+<section class="card">
+  <h2>By reach</h2>
+  <div class="scroll"><table id="reachTable"></table></div>
+  <p class="muted">"Matched" counts only reports that could be checked: not near a turn, not swirling, and below Kholo
+    Creek. It shows as a percentage once a reach has <span id="pctMin"></span> such reports; before that a percentage would
+    look more certain than it is. Devices: reports from the same phone or computer are grouped, so one keen paddler
+    doesn't look like many separate confirmations.</p>
+</section>
+
+<section class="card">
+  <h2>When, relative to high water at the Bar</h2>
+  <div class="legend" id="chartLegend"></div>
+  <svg id="chart" role="img" aria-label="Reports and observations by place along the river and time from high water at the Brisbane Bar"></svg>
+  <p class="muted">Each report sits at its place along the river (up the side) and how long before or after the
+    nearest predicted high water at the Brisbane Bar it was made (across). High water reaches places further up the
+    river later, along the line. Over time this shows where and when the flow actually turns.</p>
+</section>
+
+<section class="card hyp">
+  <h2>Hypotheses above Kholo Creek</h2>
+  <div id="hypList"></div>
+  <p class="muted">Above Kholo Creek there are no official tide figures. Anything the project says there is a
+    hypothesis: written down and dated before the data that tests it, with what would prove it wrong stated in
+    advance. The rules: <a href="https://github.com/RowanP4069/Brisbane-River-tides/blob/main/docs/hypotheses.md">docs/hypotheses.md</a>.</p>
+</section>
+
+<section class="card">
+  <h2>Field observations <span class="muted">(the project's own, checked)</span></h2>
+  <div class="scroll"><table id="obsTable"></table></div>
+  <p class="muted">Kholo Creek level: the predicted height at Kholo Creek over the observation, as a yardstick (the
+    predictions stop there). Photos and videos are kept privately.</p>
+</section>
+
+<section class="card">
+  <h2>All flow reports</h2>
+  <div class="scroll"><table id="repTable"></table></div>
+</section>
+
+<section class="card">
+  <h2 id="how">How this works</h2>
+  <p class="muted">Each report's verdict is worked out again every time this page is built, with the current
+    predictions, the same way the report page does when a report is sent. So if the predictions improve, old reports
+    show it. When a verdict now differs from the one the reporter was shown, the table says so. Within
+    <span id="turnMin"></span> minutes of predicted high or low water a report counts as "near the turn": the flow is
+    changing then, so any direction is plausible. The confidence lines: below Indooroopilly the predictions use Maritime
+    Safety Queensland's published height ratios; from there to Kholo Creek MSQ gives separate spring and neap figures,
+    which this project averages; above Kholo Creek there are only hypotheses under test.</p>
+</section>
+</main>
+
+<div id="tip"></div>
+
+<footer>
+  <p><b>Not for navigation.</b> Look after your own safety on the water.</p>
+  <p>Flow reports: shared by their reporters under CC BY 4.0, credit "Brisbane River flow reports,
+    github.com/RowanP4069/Brisbane-River-tides". Tide predictions: Brisbane Bar predictions and tidal planes © State of
+    Queensland (Maritime Safety Queensland), CC BY 4.0. River centreline: Watercourse lines - Queensland © State of
+    Queensland (Department of Resources), CC BY 4.0. Gravel runs and landmarks: field visits and OpenStreetMap
+    (© OpenStreetMap contributors, ODbL). Basemap attribution on the map.</p>
+  <p id="built" hidden></p>
+</footer>
+
+<script>
+"use strict";
+// ---- Data, inlined by build_results.py ---------------------------------------------
+const DATA = /*__DATA__*/null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const M = DATA.meta, R = DATA.river;
+
+// ---- Words --------------------------------------------------------------------------
+const DIR_WORDS = { up: "upstream", down: "downstream", slack: "slack", swirl: "swirling" };
+const STRENGTH_WORDS = ["slack", "gentle", "moderate", "strong", "very strong"];
+const VERDICT_WORDS = { match: "Matched", turn: "Near the turn", mismatch: "Didn't match", none: "No verdict" };
+const WHY_WORDS = { above: "no prediction above Kholo Creek", swirl: "swirling", no_data: "no predictions for that time" };
+const verdictText = r => r.verdict === "none" ? `No verdict (${WHY_WORDS[r.why] || "none"})` : VERDICT_WORDS[r.verdict];
+const QTY_WORDS = { run_state: "Run", water_surface: "Water surface", high_water_time: "High water at" };
+const isoMs = iso => Date.parse((iso.length === 10 ? iso + "T00:00" : iso.replace(" ", "T").slice(0, 16)) + ":00Z");  // naive AEST read as UTC
+const fmtDate = iso => new Date(isoMs(iso)).toLocaleDateString("en-AU", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
+const fmtTime = iso => new Date(isoMs(iso)).toLocaleTimeString("en-AU", { timeZone: "UTC", hour: "numeric", minute: "2-digit" });
+const fmtWhen = iso => `${fmtDate(iso)}, ${fmtTime(iso)}`;
+const fmtOff = m => { if (m === null || m === undefined) return ""; const a = Math.abs(Math.round(m)), h = Math.floor(a / 60), mm = a % 60;
+  return `${h ? h + " h " : ""}${mm} min ${m < 0 ? "before" : "after"} Bar high water`; };
+const flowText = r => DIR_WORDS[r.dir] + (r.dir === "slack" || r.dir === "swirl" || r.strength === null ? "" : `, ${STRENGTH_WORDS[r.strength]}`);
+const obsText = o => `${QTY_WORDS[o.quantity] || o.quantity} ${o.value}`;
+const placeText = (km, name) => `km ${km.toFixed(1)}${name ? ": " + name : ""}`;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// ---- Summary ------------------------------------------------------------------------
+{
+  const reps = DATA.reports, obs = DATA.observations;
+  const devs = new Set(reps.map((r, i) => r.device || "blank" + i)).size;
+  const days = new Set(reps.map(r => r.time.slice(0, 10))).size;
+  const odays = new Set(obs.map(o => o.from.slice(0, 10))).size;
+  const m = reps.filter(r => r.verdict === "match").length, x = reps.filter(r => r.verdict === "mismatch").length;
+  const above = reps.filter(r => r.why === "above").length;
+  let s = reps.length ? `${plural(reps.length, "flow report", "flow reports")} from ${plural(devs, "device", "devices")} on `
+    + `${plural(days, "day", "days")}` : "No flow reports yet";
+  s += `, and ${plural(obs.length, "field observation", "field observations")} on ${plural(odays, "day", "days")}. `;
+  if (m + x) s += `Of the ${plural(m + x, "report", "reports")} that could be checked against the predictions, ${m} matched. `;
+  if (above) s += `${above} ${above === 1 ? "was" : "were"} above Kholo Creek, where reports are the only evidence.`;
+  $("summary").textContent = s;
+  $("pctMin").textContent = M.pct_min; $("turnMin").textContent = M.turn_min;
+}
+
+// ---- Along the river ----------------------------------------------------------------
+function interp(x, xs, ys) {         // as np.interp: linear, held at the ends
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[xs.length - 1]) return ys[ys.length - 1];
+  let j = 1;
+  while (xs[j] < x) j++;
+  return ys[j - 1] + (ys[j] - ys[j - 1]) * (x - xs[j - 1]) / (xs[j] - xs[j - 1]);
+}
+const lonLatAt = km => [interp(km, R.km, R.lon), interp(km, R.km, R.lat)];
+// A short line across the river at km, halfM metres each side of the centreline.
+function acrossAt(km, halfM) {
+  const [x0, y0] = lonLatAt(km - 0.15), [x1, y1] = lonLatAt(km + 0.15), [x, y] = lonLatAt(km);
+  const kx = 111320 * Math.cos(y * Math.PI / 180), ky = 110540;
+  const dx = (x1 - x0) * kx, dy = (y1 - y0) * ky, len = Math.hypot(dx, dy) || 1;
+  const px = -dy / len * halfM, py = dx / len * halfM;
+  return [[x - px / kx, y - py / ky], [x + px / kx, y + py / ky]];
+}
+const LIMITS = [
+  { km: M.indooroopilly_km, colour: css("--lim-msq"), label: "Published ratios end",
+    text: `Indooroopilly, km ${M.indooroopilly_km.toFixed(1)}. Below here the predictions use MSQ's published height ratios.` },
+  { km: M.km_max, colour: css("--lim-kholo"), label: "MSQ figures end",
+    text: `Kholo Creek, km ${M.km_max.toFixed(1)}. From Indooroopilly to here MSQ gives separate spring and neap figures, `
+      + "which this project averages. Above here there are no predictions, only hypotheses under test." },
+];
+const markColour = v => css("--m-" + v);
+
+// ---- Map ----------------------------------------------------------------------------
+function legendItem(cls, colour, text, extra = "") {
+  return `<span><i class="sw ${cls}" style="${cls === "line" ? "border-top-color" : "background"}:${colour};${extra}"></i>${esc(text)}</span>`;
+}
+$("mapLegend").innerHTML = ["match", "turn", "mismatch", "none"].map(v => legendItem("", markColour(v), VERDICT_WORDS[v])).join("")
+  + legendItem("dia", css("--own"), "Field observation")
+  + LIMITS.map(l => legendItem("line", l.colour, l.label)).join("");
+
+function diamondImage(colour) {
+  const s = 22, c = document.createElement("canvas"); c.width = c.height = s;
+  const g = c.getContext("2d");
+  g.beginPath(); g.moveTo(s / 2, 1.5); g.lineTo(s - 1.5, s / 2); g.lineTo(s / 2, s - 1.5); g.lineTo(1.5, s / 2); g.closePath();
+  g.fillStyle = colour; g.fill(); g.lineWidth = 2; g.strokeStyle = "#fff"; g.stroke();
+  return g.getImageData(0, 0, s, s);
+}
+const reportPopupLine = r => `${fmtWhen(r.time)}, ${placeText(r.km)}: ${flowText(r)} (${r.alias || "anonymous"}). `
+  + `<span class="v-${r.verdict}">${esc(verdictText(r))}</span>`;
+const obsPopupLine = o => `${fmtDate(o.from)}, ${fmtTime(o.from)}–${fmtTime(o.to)}, ${esc(placeText(o.km, o.feature))}: `
+  + `<span class="own">${esc(obsText(o))}</span> (${esc(o.confidence)})`
+  + (o.kholo_min ? `. Kholo Creek predicted ${esc(o.kholo_min)}–${esc(o.kholo_max)} m` : "");
+
+let map = null;
+try {
+  map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/positron",
+    bounds: [[152.78, -27.62], [153.17, -27.39]], fitBoundsOptions: { padding: 20 } });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+  map.on("load", () => {
+    map.addSource("river", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString",
+      coordinates: R.lon.map((x, i) => [x, R.lat[i]]) } } });
+    map.addLayer({ id: "river", type: "line", source: "river", paint: { "line-color": "#1f6fb2", "line-width": 2, "line-opacity": .5 } });
+
+    map.addSource("limits", { type: "geojson", data: { type: "FeatureCollection", features: LIMITS.map((l, i) => ({
+      type: "Feature", properties: { i, colour: l.colour, label: l.label },
+      geometry: { type: "LineString", coordinates: acrossAt(l.km, 450) } })) } });
+    map.addLayer({ id: "limits", type: "line", source: "limits", paint: { "line-color": ["get", "colour"],
+      "line-width": 4, "line-dasharray": [2, 1] } });
+    map.addLayer({ id: "limit-labels", type: "symbol", source: "limits", layout: { "symbol-placement": "point",
+      "text-field": ["get", "label"], "text-font": ["Noto Sans Regular"], "text-size": 12, "text-anchor": "left",
+      "text-offset": [0.6, 0] }, paint: { "text-color": "#1d2329", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
+
+    map.addSource("features", { type: "geojson", data: { type: "FeatureCollection", features: DATA.features.map(f => ({
+      type: "Feature", properties: { name: f.name }, geometry: { type: "Point", coordinates: [f.lon, f.lat] } })) } });
+    map.addLayer({ id: "features", type: "circle", source: "features", minzoom: 11.5, paint: { "circle-radius": 3,
+      "circle-color": "#5d6873" } });
+    map.addLayer({ id: "feature-labels", type: "symbol", source: "features", minzoom: 13, layout: {
+      "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"], "text-size": 11, "text-offset": [0, 0.9],
+      "text-anchor": "top", "text-optional": true }, paint: { "text-color": "#5d6873", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
+
+    map.addSource("reports", { type: "geojson", data: { type: "FeatureCollection", features: DATA.reports.map((r, i) => ({
+      type: "Feature", properties: { i, colour: markColour(r.verdict) }, geometry: { type: "Point", coordinates: lonLatAt(r.km) } })) } });
+    map.addLayer({ id: "reports", type: "circle", source: "reports", paint: { "circle-radius": 7,
+      "circle-color": ["get", "colour"], "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
+
+    map.addImage("diamond", diamondImage(css("--own")));
+    map.addSource("obs", { type: "geojson", data: { type: "FeatureCollection", features: DATA.observations.map((o, i) => ({
+      type: "Feature", properties: { i }, geometry: { type: "Point", coordinates: lonLatAt(o.km) } })) } });
+    map.addLayer({ id: "obs", type: "symbol", source: "obs", layout: { "icon-image": "diamond", "icon-allow-overlap": true,
+      "icon-offset": [14, 0] } });
+
+    // A tap lists everything under it: reports, observations and limit lines.
+    map.on("click", e => {
+      const box = 6, hits = map.queryRenderedFeatures([[e.point.x - box, e.point.y - box], [e.point.x + box, e.point.y + box]],
+        { layers: ["reports", "obs", "limits"] });
+      if (!hits.length) return;
+      const ids = layer => [...new Set(hits.filter(h => h.layer.id === layer).map(h => h.properties.i))];
+      const reps = ids("reports").map(i => DATA.reports[i]).sort((a, b) => b.time.localeCompare(a.time));
+      const obs = ids("obs").map(i => DATA.observations[i]).sort((a, b) => b.from.localeCompare(a.from));
+      const lines = ids("limits").map(i => `<b>${esc(LIMITS[i].label)}</b>. ${esc(LIMITS[i].text)}`)
+        .concat(obs.map(obsPopupLine), reps.slice(0, 6).map(reportPopupLine));
+      if (reps.length > 6) lines.push(`<span class="muted">and ${reps.length - 6} older reports</span>`);
+      new maplibregl.Popup().setLngLat(e.lngLat).setHTML(lines.map(l => `<div>${l}</div>`).join("")).addTo(map);
+    });
+    for (const layer of ["reports", "obs", "limits"]) {
+      map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
+    }
+  });
+} catch (err) {
+  console.error("Map unavailable:", err);
+  $("map").style.display = "none"; $("noMap").style.display = "block";
+}
+
+// ---- By reach -----------------------------------------------------------------------
+{
+  const ZONES = [
+    { id: "msq", head: "Brisbane Bar to Indooroopilly", sub: "MSQ published ratios" },
+    { id: "msq_sn", head: "Indooroopilly to Kholo Creek", sub: "MSQ spring and neap figures, averaged" },
+    { id: "hyp", head: "Above Kholo Creek", sub: "no predictions: hypotheses under test" },
+  ];
+  let h = `<thead><tr><th>Reach</th><th class="n">Reports</th><th class="n">Devices</th><th class="n">Days</th>`
+    + `<th class="n">Matched</th><th class="n">Near turn</th><th class="n">Didn't match</th><th class="n">No verdict</th>`
+    + `<th class="n">Field obs.</th></tr></thead><tbody>`;
+  for (const z of ZONES) {
+    h += `<tr class="zone"><td colspan="9">${esc(z.head)} <span class="muted">${esc(z.sub)}</span></td></tr>`;
+    const rows = DATA.reaches.filter(r => r.zone === z.id && (r.reports || r.observations));
+    if (!rows.length) { h += `<tr><td colspan="9" class="muted">No reports yet.</td></tr>`; continue; }
+    for (const r of rows) {
+      const dash = v => v ? v : `<span class="muted">0</span>`;
+      const matched = z.id === "hyp" ? `<span class="muted">no prediction</span>`
+        : r.matched ? `<span class="v-match">${esc(r.matched)}</span>` : `<span class="muted">none checkable</span>`;
+      h += `<tr><td>${esc(r.name)} <span class="muted">km ${r.from_km.toFixed(1)}–${r.to_km.toFixed(1)}</span></td>`
+        + `<td class="n">${dash(r.reports)}</td><td class="n">${dash(r.devices)}</td><td class="n">${dash(r.days)}</td>`
+        + `<td class="n">${matched}</td><td class="n">${dash(r.turn)}</td><td class="n">${dash(r.mismatch)}</td>`
+        + `<td class="n">${dash(r.none)}</td><td class="n">${r.observations ? `<span class="own">${r.observations}</span>` : dash(0)}</td></tr>`;
+    }
+  }
+  $("reachTable").innerHTML = h + "</tbody>";
+}
+
+// ---- Chart: km against time from Bar high water --------------------------------------
+function drawChart() {
+  const svg = $("chart"), NS = "http://www.w3.org/2000/svg";
+  svg.replaceChildren();
+  // Drawn at the box's own width (1 unit = 1 px) so the text stays readable on a phone.
+  const W = Math.max(320, Math.round(svg.parentElement.clientWidth)), H = W < 560 ? 380 : 440;
+  const L = 40, Rm = 10, T = 12, B = 34;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const X0 = -390, X1 = 390, Y0 = 0, Y1 = Math.ceil(M.report_km_max / 10) * 10;
+  const sx = m => L + (m - X0) / (X1 - X0) * (W - L - Rm), sy = km => H - B - (km - Y0) / (Y1 - Y0) * (H - T - B);
+  const el = (name, attrs, parent = svg) => { const e = document.createElementNS(NS, name);
+    for (const k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; };
+  const txt = (x, y, s, attrs = {}) => { const e = el("text", { x, y, ...attrs }); e.textContent = s; return e; };
+
+  for (let km = 0; km <= Y1; km += 10) {
+    el("line", { x1: L, x2: W - Rm, y1: sy(km), y2: sy(km), class: "grid" });
+    txt(L - 6, sy(km) + 4, `${km}`, { "text-anchor": "end" });
+  }
+  txt(12, T + (H - T - B) / 2, "km up the river", { transform: `rotate(-90 12 ${T + (H - T - B) / 2})`, "text-anchor": "middle" });
+  for (let m = -360; m <= 360; m += 120) {
+    el("line", { x1: sx(m), x2: sx(m), y1: T, y2: H - B, class: m === 0 ? "axis" : "grid" });
+    txt(sx(m), H - B + 15, m === 0 ? "Bar HW" : `${m > 0 ? "+" : "−"}${Math.abs(m / 60)} h`, { "text-anchor": "middle" });
+  }
+  txt(L + (W - L - Rm) / 2, H - 4, "time from nearest predicted high water at the Bar", { "text-anchor": "middle" });
+
+  // Limit lines, labelled in the right margin.
+  for (const l of LIMITS) {
+    el("line", { x1: L, x2: W - Rm, y1: sy(l.km), y2: sy(l.km), stroke: l.colour, "stroke-width": 2, "stroke-dasharray": "6 3" });
+    txt(W - Rm - 4, sy(l.km) + 14, l.label, { style: "fill:var(--fg)", "text-anchor": "end" });
+  }
+  // H1's window above Kholo: a band between the slowest and fastest claimed timings.
+  const h1 = DATA.h1, d = h1.to_km - h1.from_km;
+  const band = [[h1.base_min, h1.from_km], [h1.base_min + h1.hi_per_km * d, h1.to_km],
+                [h1.base_min + h1.lo_per_km * d, h1.to_km]];
+  const bandEl = el("polygon", { points: band.map(([m, km]) => `${sx(m)},${sy(km)}`).join(" "),
+    fill: css("--own"), "fill-opacity": .18, stroke: css("--own"), "stroke-width": 1 });
+  bandEl.dataset.tip = `H1: high water ${h1.base_min}–${Math.round(h1.base_min + h1.hi_per_km * d)} min after Bar high water, `
+    + `km ${h1.from_km}–${h1.to_km} (hypothesis under test)`;
+  txt(sx(h1.base_min + h1.hi_per_km * d) + 6, sy(h1.to_km) + 4, "H1 window", { style: `fill:${css("--own")}` });
+  // Predicted high water (MSQ's high-water lags) up to Kholo.
+  const hw = DATA.hw_line;
+  const hwEl = el("polyline", { points: hw.km.map((km, i) => `${sx(hw.min[i])},${sy(km)}`).join(" "),
+    fill: "none", stroke: css("--accent"), "stroke-width": 2 });
+  hwEl.dataset.tip = "Predicted high water: when MSQ's tables put high water at each place, after the Bar's";
+  txt(sx(interp(20, hw.km, hw.min)) + 8, sy(20), "predicted high water", { style: `fill:${css("--accent")}` });
+
+  // Field observations: a span across their time, a diamond at its middle.
+  for (const o of DATA.observations) {
+    if (!o.bar_hw_min) continue;
+    const [a, b] = o.bar_hw_min, y = sy(o.km), xm = sx((a + b) / 2);
+    el("line", { x1: sx(a), x2: sx(b), y1: y, y2: y, stroke: css("--own"), "stroke-width": 2 });
+    const s = 6;
+    const dEl = el("polygon", { points: `${xm},${y - s} ${xm + s},${y} ${xm},${y + s} ${xm - s},${y}`, fill: css("--own"), class: "mk" });
+    dEl.dataset.tip = `Field observation, ${fmtDate(o.from)} ${fmtTime(o.from)}–${fmtTime(o.to)}, ${placeText(o.km, o.feature)}: `
+      + `${obsText(o)}. ${fmtOff(a)} to ${fmtOff(b)}.`;
+  }
+  // Reports: shape = direction seen, colour = verdict.
+  for (const r of DATA.reports) {
+    if (r.bar_hw_min === null) continue;
+    const x = sx(r.bar_hw_min), y = sy(r.km), s = 6.5, c = markColour(r.verdict);
+    let e;
+    if (r.dir === "up") e = el("polygon", { points: `${x},${y - s} ${x + s},${y + s * .8} ${x - s},${y + s * .8}`, fill: c, class: "mk" });
+    else if (r.dir === "down") e = el("polygon", { points: `${x},${y + s} ${x + s},${y - s * .8} ${x - s},${y - s * .8}`, fill: c, class: "mk" });
+    else if (r.dir === "slack") e = el("circle", { cx: x, cy: y, r: 5, fill: "#fff", stroke: c, "stroke-width": 2.5, class: "mk" });
+    else e = el("path", { d: `M${x - 5},${y - 5}L${x + 5},${y + 5}M${x - 5},${y + 5}L${x + 5},${y - 5}`, stroke: c, "stroke-width": 2.5, class: "mk" });
+    e.dataset.tip = `${fmtWhen(r.time)}, ${placeText(r.km)}: ${flowText(r)} (${r.alias || "anonymous"}). ${verdictText(r)}. ${fmtOff(r.bar_hw_min)}.`;
+  }
+
+}
+{
+  const svg = $("chart");
+  $("chartLegend").innerHTML = `<span>▲ flow upstream</span><span>▼ flow downstream</span><span>○ slack</span><span>✕ swirling</span>`
+    + ["match", "turn", "mismatch", "none"].map(v => legendItem("", markColour(v), VERDICT_WORDS[v])).join("")
+    + legendItem("dia", css("--own"), "Field observation")
+    + legendItem("line", css("--accent"), "Predicted high water", "border-top-style:solid")
+    + legendItem("band", css("--own"), "H1 window", "opacity:.35");
+
+  // Hover (or tap) a mark for its details.
+  const tip = $("tip");
+  const show = e => { const t = e.target.dataset && e.target.dataset.tip; if (!t) { tip.style.display = "none"; return; }
+    tip.textContent = t; tip.style.display = "block";
+    const x = e.clientX ?? (e.touches && e.touches[0].clientX), y = e.clientY ?? (e.touches && e.touches[0].clientY);
+    tip.style.left = Math.min(x + 12, window.innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (y + 14) + "px"; };
+  svg.addEventListener("mousemove", show);
+  svg.addEventListener("click", show);
+  svg.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+  window.addEventListener("scroll", () => { tip.style.display = "none"; }, { passive: true });
+}
+
+drawChart();
+let chartWidth = $("chart").parentElement.clientWidth;
+window.addEventListener("resize", () => {
+  const w = $("chart").parentElement.clientWidth;
+  if (Math.abs(w - chartWidth) > 4) { chartWidth = w; drawChart(); }
+});
+
+// ---- Hypotheses ---------------------------------------------------------------------
+{
+  const h = DATA.h1, t = h.tests, n = t.length, against = t.filter(x => x.result === "against").length;
+  const days = new Set(t.map(x => x.time.slice(0, 10))).size;
+  const tally = n ? `${plural(n, "test", "tests")} on ${plural(days, "day", "days")}: ${n - against} consistent, ${against} against.`
+    : "No tests yet.";
+  let rows = "";
+  if (n) rows = `<div class="scroll"><table><thead><tr><th>When</th><th class="n">km</th><th class="n">After Bar HW</th>`
+    + `<th class="n">Window</th><th>Result</th></tr></thead><tbody>` + t.map(x => `<tr><td>${esc(fmtWhen(x.time))}</td>`
+    + `<td class="n">${x.km.toFixed(1)}</td><td class="n">${x.bar_hw_min === null ? "" : Math.round(x.bar_hw_min) + " min"}</td>`
+    + `<td class="n">${Math.round(x.lo)}–${Math.round(x.hi)} min</td>`
+    + `<td class="${x.result === "for" ? "v-match" : "v-mismatch"}">${x.result === "for" ? "Consistent" : "Against"}</td></tr>`).join("")
+    + "</tbody></table></div>";
+  $("hypList").innerHTML = `<h3><span class="own">H1</span>: high water timing up to Colleges Crossing `
+    + `<span class="muted">(under test since ${esc(fmtDate(h.since))})</span></h3>`
+    + `<p>Between Kholo Creek (km ${h.from_km}) and just below the Colleges Crossing run (km ${h.to_km}), high water comes `
+    + `${h.lo_per_km}–${h.hi_per_km} minutes per km later than at Kholo Creek, which is ${h.base_min} minutes after the Bar. `
+    + `Just below the run that is ${Math.round(h.base_min + h.lo_per_km * (h.to_km - h.from_km))}–`
+    + `${Math.round(h.base_min + h.hi_per_km * (h.to_km - h.from_km))} minutes after Bar high water.</p>`
+    + `<p class="tally">${esc(tally)}</p>${rows}`;
+}
+
+// ---- Tables of observations and reports ----------------------------------------------
+{
+  const obs = [...DATA.observations].sort((a, b) => b.from.localeCompare(a.from));
+  $("obsTable").innerHTML = `<thead><tr><th>Date</th><th>Time</th><th>Place</th><th>Seen</th><th>Confidence</th>`
+    + `<th class="n">Kholo Creek level</th></tr></thead><tbody>` + (obs.length ? obs.map(o => `<tr><td>${esc(fmtDate(o.from))}</td>`
+    + `<td>${esc(fmtTime(o.from))}–${esc(fmtTime(o.to))}</td><td>${esc(placeText(o.km, o.feature))}</td>`
+    + `<td class="own">${esc(obsText(o))}</td><td>${esc(o.confidence)}</td>`
+    + `<td class="n">${o.kholo_min ? `${esc(o.kholo_min)}–${esc(o.kholo_max)} m` : ""}</td></tr>`).join("")
+    : `<tr><td colspan="6" class="muted">None yet.</td></tr>`) + "</tbody>";
+
+  const reps = [...DATA.reports].sort((a, b) => b.time.localeCompare(a.time));
+  const BANK = { mid: "mid", left: "left", right: "right" };
+  $("repTable").innerHTML = `<thead><tr><th>When</th><th class="n">km</th><th>Bank</th><th>Flow</th><th>Verdict</th>`
+    + `<th>Reporter</th></tr></thead><tbody>` + (reps.length ? reps.map(r => `<tr><td>${esc(fmtWhen(r.time))}</td>`
+    + `<td class="n">${r.km.toFixed(1)}</td><td>${esc(BANK[r.bank] || r.bank)}</td><td>${esc(flowText(r))}</td>`
+    + `<td><span class="v-${r.verdict}">${esc(verdictText(r))}</span>`
+    + (r.sent_verdict !== r.verdict ? ` <span class="muted">(${esc(VERDICT_WORDS[r.sent_verdict] || r.sent_verdict)} when sent)</span>` : "")
+    + `</td><td>${esc(r.alias || "anonymous")}</td></tr>`).join("")
+    : `<tr><td colspan="6" class="muted">None yet. <a href="report.html">Send the first!</a></td></tr>`) + "</tbody>";
+}
+
+if (M.built) {
+  $("built").textContent = `Page built ${fmtWhen(M.built.replace("T", " "))} AEST.`;
+  $("built").hidden = false;
+}
+</script>
+</body>
+</html>

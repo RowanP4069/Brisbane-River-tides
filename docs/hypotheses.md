@@ -80,8 +80,11 @@ each time: a bridge pier, a rock, a post. Then:
 2. From about 45 minutes before that window to 45 minutes after, photograph the mark
    every 10 minutes or so. The camera's clock gives the times.
 3. High water is the photo, or the middle of the run of photos, where the level is
-   highest. Record that time to the nearest 10 minutes, the km, and the predicted Bar
-   high water. Add a row to `data/observations.csv` with quantity `high_water_time`.
+   highest. Record that time to the nearest 10 minutes and the km. Add a row to
+   `data/observations.csv` with quantity `high_water_time`, `value` the observed high
+   water as `YYYY-MM-DD HH:MM`, `km_from` the place, and the photo span as the times.
+   A day that doesn't count (below) gets `confidence` `excluded`. The results page
+   works out the time from Bar high water and the result itself.
 
 ### What would prove it wrong
 

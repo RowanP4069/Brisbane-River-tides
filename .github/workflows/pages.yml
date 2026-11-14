@@ -3,6 +3,7 @@
 #   https://rowanp4069.github.io/Brisbane-River-tides/gauges.html  measured gauges
 #   https://rowanp4069.github.io/Brisbane-River-tides/compare.html measured vs predicted
 #   https://rowanp4069.github.io/Brisbane-River-tides/report.html  report the flow
+#   https://rowanp4069.github.io/Brisbane-River-tides/results.html report the flow (results)
 # The generated HTML is not committed; each run makes a fresh one.
 #
 # Needs, once: repo Settings -> Pages -> Source: GitHub Actions.
@@ -59,6 +60,9 @@ jobs:
       - run: python compare_gauges.py --stamp --out site/compare.html
       # Report the flow: the form page, with the last 30 days of reports on its map.
       - run: python build_report.py --stamp --out site/report.html
+      # Report the flow (results): every report and field observation so far, by reach,
+      # with verdicts worked out again against the current model.
+      - run: python build_results.py --stamp --out site/results.html
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site

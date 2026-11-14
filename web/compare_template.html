@@ -56,8 +56,8 @@
 </head>
 <body>
 <header>
-  <nav class="pages"><a href="index.html">Predictions</a><a href="gauges.html">Gauges (measured)</a><a href="compare.html" aria-current="page">Measured vs predicted</a><a href="report.html">Report the flow</a></nav>
-  <h1>Measured vs predicted: how well did the predictions match the river?</h1>
+  <nav class="pages"><a href="index.html">Height predictions</a><a href="gauges.html">Gauges (measured)</a><a href="compare.html" aria-current="page">Measured vs predicted</a><a href="report.html">Report the flow</a><a href="results.html">Report the flow (results)</a></nav>
+  <h1>Measured vs predicted water height: how well did the predictions match the river?</h1>
   <span class="sub" id="subtitle"></span>
 </header>
 
@@ -66,6 +66,8 @@
   checks it: for each gauge, the water level that was <span class="key-m">measured</span> against what the model
   <span class="key-p">predicted</span> for the same place and time. Pick any period we have readings for. Hover over
   (or tap) a column heading for what it means; <a href="#how">how this works</a> is at the bottom.</p>
+<p class="intro">This compares water <b>height</b>, not flow direction. The flow keeps running for a while after
+  the level turns; for what paddlers have seen of the flow, see <a href="results.html">Report the flow (results)</a>.</p>
 
 <div id="controls">
   <label>From <input id="from" type="date"></label>

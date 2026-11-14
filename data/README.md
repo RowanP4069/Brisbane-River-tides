@@ -106,7 +106,7 @@ What field visits showed, one row per thing seen: whether a gravel run was runni
 
 - **What is recorded:** what was seen, not what it means. For example, calm water above a run is recorded as `water_surface` `calm`, without claiming the tide reached it: it may be a pool held up by the run. Whether a run is drowned is judged at the run itself. Conclusions drawn from these rows (such as the Kholo Creek level that drowns each run) are kept with the project's notes, not here.
 - **`kholo_min_m`, `kholo_max_m`:** the predicted level at Kholo Creek (m above LAT) over the observation's time span, from this project's model (`river_tides.heights()`) and that year's Brisbane Bar predictions. For 2023 those come from MSQ's 2023 file on data.qld.gov.au (download only; not stored here). It is a yardstick, not a prediction at the run: the model stops at Kholo Creek.
-- **Values:** `quantity` is `run_state` (`running`, `marginal` or `drowned`) or `water_surface` (`calm`, `rippled`, ...). `confidence` is `certain`, `likely` or `unsure`.
+- **Values:** `quantity` is `run_state` (`running`, `marginal` or `drowned`), `water_surface` (`calm`, `rippled`, ...) or `high_water_time` (the observed time of high water, `YYYY-MM-DD HH:MM`, a test of hypothesis H1 in `docs/hypotheses.md`). `confidence` is `certain`, `likely` or `unsure`, or `excluded` for a test that doesn't count under the hypothesis's rules.
 - **Columns:** `obs_id` (date and number), `time_from_aest`, `time_to_aest`, `feature_id` (from `features.csv`, blank if none), `km_from`, `km_to`, `quantity`, `value`, `confidence`, `kholo_min_m`, `kholo_max_m`, `evidence` (media file names, kept privately, and any flow reports), `observer`, `notes`.
 
 ---

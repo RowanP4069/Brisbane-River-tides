@@ -74,6 +74,14 @@ A fourth page, **Report the flow**, lets people on the river report which way th
 - The page remembers the reporter's name in the browser (local storage, not a cookie) and gives each device a random ID. Reports publish its first 8 characters as `device`, so reports from one device can be grouped; the private part keeps the whole ID. Nothing about the person or their IP address is stored.
 - To hide a report, add its `submitted_aest` to `data/reports_hidden.csv`; to hide every report from a device, fill in the `device` column instead. They disappear at the next daily run.
 - Reports are shared under CC BY 4.0.
+
+### Results
+
+**Report the flow (results)** gathers everything seen so far: every accepted report and the project's own field observations (`data/observations.csv`), on a map with two confidence lines (Indooroopilly, where MSQ's published ratios end, and Kholo Creek, where MSQ's figures end), a summary by reach, and a chart of where along the river and how long before or after high water at the Bar each was seen: <https://rowanp4069.github.io/Brisbane-River-tides/results.html>.
+
+- `build_results.py` builds it, working each report's verdict out again against the current model, so the match rate follows the model as it improves. The build prints any report whose verdict differs from the one the reporter was shown.
+- A reach's match rate shows as "m of n" until it has 5 checkable reports, then as a percentage. Reports from one device are counted as one device, so a single keen paddler doesn't look like many confirmations.
+- Above Kholo Creek the page shows the hypotheses under test (`docs/hypotheses.md`) with their running tallies.
 - [docs/report-form-setup.md](docs/report-form-setup.md) says how the Google Form and its sheet are set up, to check or rebuild them.
 
 ## Limitations
