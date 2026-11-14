@@ -9,7 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
 <style>
   :root { --fg:#1d2329; --muted:#5d6873; --line:#d5dbe0; --bg:#f6f7f8; --panel:#ffffff; --accent:#1f6fb2;
-    --ok:#1e7b3a; --turn:#8a6d00; --off:#a3261b; --up:#1f6fb2; --down:#c0612b; --slack:#6b7580; --swirl:#7b4fa8; }
+    --ok:#1e7b3a; --turn:#8a6d00; --off:#a3261b; }
   * { box-sizing: border-box; }
   html, body { margin:0; background:var(--bg); color:var(--fg);
     font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -41,12 +41,16 @@
   button { font:inherit; padding:8px 14px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer; }
   button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; padding:11px 20px; }
   button:disabled { opacity:.6; cursor:default; }
+  /* The send button shows what happened in solid colours, readable in bright sun. */
+  #send { width:100%; font-size:17px; padding:14px 20px; }
+  #send.sent { background:var(--ok); border-color:var(--ok); opacity:1; }
+  #send.failed { background:var(--off); border-color:var(--off); }
+  #send.testmode { background:var(--muted); border-color:var(--muted); opacity:1; }
   #errors { color:var(--off); font-weight:600; }
   #result { display:none; }
   #result .verdict { font-size:18px; font-weight:700; margin:0 0 4px; }
   #result.match .verdict { color:var(--ok); } #result.turn .verdict { color:var(--turn); }
   #result.mismatch .verdict { color:var(--off); } #result.none .verdict { color:var(--muted); }
-  .key span { display:inline-block; width:10px; height:10px; border-radius:50%; margin:0 4px 0 10px; vertical-align:-1px; }
   #recentList { margin:6px 0 0; padding-left:18px; font-size:13px; }
   footer { max-width:760px; margin:0 auto; padding:6px 16px 14px; font-size:11px; color:var(--muted); }
   footer p { margin:2px 0; }
@@ -127,8 +131,6 @@
     <label><input type="checkbox" value="foam"> Foam / scum</label>
     <label><input type="checkbox" value="oil"> Oily sheen</label>
     <label><input type="checkbox" value="algae"> Algae / weed</label>
-    <label><input type="checkbox" value="smell"> Bad smell</label>
-    <label><input type="checkbox" value="dead_fish"> Dead fish</label>
   </div>
   <div class="muted" style="margin-top:8px">Notes (not published: only the project sees them)</div>
   <textarea id="notes" maxlength="1000"></textarea>
@@ -156,7 +158,7 @@
 
 <section class="step">
   <h2>Recent reports <span class="opt" id="recentCount"></span></h2>
-  <div class="muted key">Dots on the map:<span style="background:var(--up)"></span>upstream<span style="background:var(--down)"></span>downstream<span style="background:var(--slack)"></span>slack<span style="background:var(--swirl)"></span>swirling</div>
+  <div class="muted">Each dark dot on the map is a report. Tap one for details.</div>
   <ul id="recentList"></ul>
 </section>
 
@@ -283,6 +285,7 @@ function snap(lon, lat) {
 const lonLatAt = km => [interp(km, R.km, R.lon), interp(km, R.km, R.lat)];
 // Predictions reach Kholo Creek (KM_MAX); reports are taken up to the old weir ruin
 // (REPORT_KM_MAX), where the tide stops. In between, a report gets no verdict.
+const POPUP_MAX = 5;            // reports listed when a map dot is tapped
 const KM_MAX = DATA.meta.km_max, REPORT_KM_MAX = DATA.meta.report_km_max, MAX_OFF = DATA.meta.max_off_m;
 const BANK_WORDS = { mid: "mid-river", left: "left bank (looking downstream)", right: "right bank (looking downstream)" };
 const place = { lon: null, lat: null, km: null, off: null, bank: null };
@@ -336,7 +339,6 @@ $("rampIn").addEventListener("change", () => { if ($("rampIn").value !== "") use
 $("bankIn").addEventListener("change", useKm);
 
 // ---- Map ----------------------------------------------------------------------------
-const COLOURS = { up: "#1f6fb2", down: "#c0612b", slack: "#6b7580", swirl: "#7b4fa8" };
 let map = null, marker = null;
 try {
   map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/positron",
@@ -368,13 +370,26 @@ try {
     map.on("mouseenter", "ramps", () => { map.getCanvas().style.cursor = "pointer"; });
     map.on("mouseleave", "ramps", () => { map.getCanvas().style.cursor = ""; });
     map.addSource("reports", { type: "geojson", data: { type: "FeatureCollection", features: DATA.reports.map((r, i) => ({
-      type: "Feature", id: i, properties: { i, colour: COLOURS[r.dir] || "#888" }, geometry: { type: "Point", coordinates: lonLatAt(r.km) } })) } });
-    map.addLayer({ id: "reports", type: "circle", source: "reports", paint: { "circle-radius": 6, "circle-color": ["get", "colour"],
+      type: "Feature", id: i, properties: { i }, geometry: { type: "Point", coordinates: lonLatAt(r.km) } })) } });
+    map.addLayer({ id: "reports", type: "circle", source: "reports", paint: { "circle-radius": 6, "circle-color": "#1d2329",
       "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } });
+    // Reports at the same km share a spot, so a tap lists all of them: the newest few,
+    // then how many more.
     map.on("click", "reports", e => {
-      const r = DATA.reports[e.features[0].properties.i];
-      new maplibregl.Popup().setLngLat(e.lngLat).setText(reportLine(r)).addTo(map);
+      const rs = [...new Set(e.features.map(f => f.properties.i))].map(i => DATA.reports[i])
+        .sort((a, b) => b.time.localeCompare(a.time));
+      const box = document.createElement("div");
+      for (const r of rs.slice(0, POPUP_MAX)) {
+        const line = document.createElement("div"); line.textContent = reportLine(r); box.appendChild(line);
+      }
+      if (rs.length > POPUP_MAX) {
+        const more = document.createElement("div"); more.className = "muted";
+        more.textContent = `and ${rs.length - POPUP_MAX} older`; box.appendChild(more);
+      }
+      new maplibregl.Popup().setLngLat(e.lngLat).setDOMContent(box).addTo(map);
     });
+    map.on("mouseenter", "reports", () => { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", "reports", () => { map.getCanvas().style.cursor = ""; });
   });
 } catch (err) {
   console.error("Map unavailable:", err);
@@ -457,6 +472,11 @@ function buildReport(ms, verdict, device) {
     problems: [...document.querySelectorAll("#problemChoices input:checked")].map(e => e.value),
     verdict, device: device.slice(0, 8) };
 }
+// The send button's look and words: "" (ready or sending), "sent", "failed" or "testmode".
+function setSend(state, words) {
+  $("send").className = "primary" + (state ? " " + state : "");
+  $("send").textContent = words;
+}
 $("send").addEventListener("click", async () => {
   const errs = problems();
   $("errors").textContent = errs.join(" ");
@@ -467,17 +487,23 @@ $("send").addEventListener("click", async () => {
     notes: $("notes").value.trim().slice(0, 1000), device };
   store.set("alias", report.alias);
   $("send").disabled = true;
+  setSend("", "Sending…");
   let sent;
-  if (!DATA.form.action) sent = "Test mode: this page isn't connected to the report store yet, so nothing was sent.";
-  else {
+  if (!DATA.form.action) {
+    sent = "Test mode: this page isn't connected to the report store yet, so nothing was sent.";
+    setSend("testmode", "Not sent (test mode)");
+  } else {
     try {
       // Google Forms doesn't allow reading its reply from another site ("no-cors"), so
       // the page can't confirm the report arrived, only that it was sent.
       await fetch(DATA.form.action, { method: "POST", mode: "no-cors",
         body: new URLSearchParams({ [DATA.form.report]: JSON.stringify(report), [DATA.form.private]: JSON.stringify(priv) }) });
       sent = "Sent, thank you! It will appear on the map within about a day.";
+      const at = new Date().toLocaleTimeString("en-AU", { timeZone: "Australia/Brisbane", hour: "numeric", minute: "2-digit" });
+      setSend("sent", `✓ Sent ${at}`);
     } catch (e) {
       sent = "Couldn't send it (no connection?). Try again in a moment.";
+      setSend("failed", "✗ Not sent – tap to try again");
       $("send").disabled = false;
     }
   }
@@ -486,10 +512,11 @@ $("send").addEventListener("click", async () => {
   $("verdict").textContent = ver.head;
   $("verdictText").textContent = ver.text;
   $("sentText").textContent = sent;
-  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+  // Scroll to the button, not the result below it, so its new colour stays in view.
+  $("send").scrollIntoView({ behavior: "smooth", block: "start" });
 });
 $("another").addEventListener("click", () => {
-  $("result").style.display = "none"; $("send").disabled = false; resetWhen();
+  $("result").style.display = "none"; $("send").disabled = false; setSend("", "Send report"); resetWhen();
   document.querySelectorAll("input[name=dir], input[name=strength]").forEach(el => { el.checked = false; });
   window.scrollTo({ top: 0, behavior: "smooth" });
 });

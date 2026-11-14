@@ -55,7 +55,7 @@ FIELDS = ["submitted_aest", "time_aest", "km", "bank", "alias", "dir_kind", "dir
           "speed_kmh", "clarity", "problems", "verdict", "device"]
 DIRS = {"up", "down", "slack", "swirl"}
 BANKS = {"mid", "left", "right"}
-PROBLEMS = {"debris", "rubbish", "foam", "oil", "algae", "smell", "dead_fish"}
+PROBLEMS = {"debris", "rubbish", "foam", "oil", "algae"}
 VERDICTS = {"match", "turn", "mismatch", "none"}
 MAX_OFF_M = 350                  # as build_report.MAX_OFF_M
 KM_MAX = 87.4                    # the old weir ruin, as build_report.REPORT_KM_MAX
