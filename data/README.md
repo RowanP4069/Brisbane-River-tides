@@ -10,6 +10,8 @@ Placeholders marked `TODO` are things I couldn't confirm from here. Fill them in
 | `stations.csv` | Secondary-port corrections (lag, ratio) and chainage per station | Hand-built from the MSQ 2026 tidal planes PDF; chainage from `build_centreline.py` |
 | `qld_watercourse_brisbane_river.geojson` | Brisbane River segments of the QLD watercourse lines layer, as downloaded | QLD Department of Resources spatial service |
 | `centreline.csv` | Single ordered river centreline, Brisbane Bar gauge upstream, with chainage | Derived by `build_centreline.py` from the file above |
+| `features.csv` | Gravel runs and landmarks between Kholo Creek and the old weir ruin | Field visits and OpenStreetMap |
+| `observations.csv` | What field visits showed at those features (run running or drowned, water surface) | Field visits, with photos and videos kept privately |
 
 ---
 
@@ -83,6 +85,29 @@ Public boat ramps on the Brisbane River itself, from the mouth to the old weir r
 - **Brisbane City Council (14 ramps):** dataset *Boat Ramp locations*, © Brisbane City Council, CC BY 4.0. <https://data.brisbane.qld.gov.au/explore/dataset/boat-ramp-locations>. Of its 39 ramps, only those within 350 m of the centreline are kept; the rest are on the bay or up creeks (Breakfast, Norman, Oxley and Bulimba creeks). `name` is the council's street and suburb, plus "(canoe ramp)" where the council says so, except Caringal Dr, Karana Downs, which is named Kookaburra Park (`RAMP_NAMES` in `build_report.py`).
 - **Maritime Safety Queensland (3 ramps: Goodna, Barellan Point, Colleges Crossing):** the council's list stops at its boundary, and Ipswich City Council's open data has no ramp list (checked 2026-11-09). These are read off the boat-ramp symbols on maps BR-2 and BR-1 of *Beacon to Beacon Guide: Brisbane River and Bremer River* (2018), © State of Queensland (Department of Transport and Main Roads), CC BY 4.0, using the map's 1-minute grid. Checked against two ramps the council also lists: the Jindalee symbol (BR-2) lands 15 m and the Kookaburra Park symbol (BR-1) 20 m from the council's positions. Goodna and Barellan Point match OpenStreetMap's slipways to 0.1 km. The positions are in `GUIDE_RAMPS` in `build_report.py`.
 - **Columns:** `name`, `lat`, `lon`, `source` (council asset id, or the guide map). `km` is the ramp projected onto `centreline.csv`.
+
+---
+
+## `features.csv`
+
+Fixed things on the river that observations refer to: gravel runs, structures and landmarks between Kholo Creek (km 75.8, where the predictions stop) and the old weir ruin (km 87.4). Started 2026-11-14.
+
+Between Kholo Creek and the ruin the head of the tide is not a fixed point. It moves between the gravel run under the Colleges Crossing road bridge and the run below the ruin: a run is drowned when the tide is above it, and runs one way, fresh, when the tide is below it. These runs stay put between big floods, so `last_seen` records when each was last confirmed in place, and a new survey after a major flood should update them.
+
+- **Sources:** field visits by the project owner (positions read from photo GPS, rounded to about 10 m), and OpenStreetMap for the road bridge, the pipe crossing, the weir ruin and the power lines (© OpenStreetMap contributors, ODbL, <https://www.openstreetmap.org/copyright>; looked up 2026-11-14). Where a feature crosses the river, `lat`/`lon` is where its OpenStreetMap line crosses `centreline.csv`.
+- **Power lines** are listed as landmarks: they show in photos and give a check on where a photo was taken and which way it faces.
+- **Columns:** `feature_id` (used by `observations.csv`), `kind`, `name`, `km` (on `centreline.csv`), `lat`, `lon`, `description`, `source`, `last_seen` (date the feature was last seen in place, blank if not yet checked on the ground), `ref_media` (file name of a reference photo or video; the media themselves are kept privately, not in this repository).
+
+---
+
+## `observations.csv`
+
+What field visits showed, one row per thing seen: whether a gravel run was running or drowned, or what the water surface looked like. Started 2026-11-14. The flow reports (which way the water was moving) are a separate record on the `reports` branch.
+
+- **What is recorded:** what was seen, not what it means. For example, calm water above a run is recorded as `water_surface` `calm`, without claiming the tide reached it: it may be a pool held up by the run. Whether a run is drowned is judged at the run itself. Conclusions drawn from these rows (such as the Kholo Creek level that drowns each run) are kept with the project's notes, not here.
+- **`kholo_min_m`, `kholo_max_m`:** the predicted level at Kholo Creek (m above LAT) over the observation's time span, from this project's model (`river_tides.heights()`) and that year's Brisbane Bar predictions. For 2023 those come from MSQ's 2023 file on data.qld.gov.au (download only; not stored here). It is a yardstick, not a prediction at the run: the model stops at Kholo Creek.
+- **Values:** `quantity` is `run_state` (`running`, `marginal` or `drowned`) or `water_surface` (`calm`, `rippled`, ...). `confidence` is `certain`, `likely` or `unsure`.
+- **Columns:** `obs_id` (date and number), `time_from_aest`, `time_to_aest`, `feature_id` (from `features.csv`, blank if none), `km_from`, `km_to`, `quantity`, `value`, `confidence`, `kholo_min_m`, `kholo_max_m`, `evidence` (media file names, kept privately, and any flow reports), `observer`, `notes`.
 
 ---
 
