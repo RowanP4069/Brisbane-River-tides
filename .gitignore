@@ -10,3 +10,6 @@ output/
 .idea/
 .claude/settings.local.json
 .mcp.json
+
+# Private field media (GoPro raw etc.), never committed: repo is public
+private raw data/
