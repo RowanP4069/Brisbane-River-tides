@@ -163,7 +163,7 @@ const STRENGTH_WORDS = ["slack", "gentle", "moderate", "strong", "very strong"];
 const VERDICT_WORDS = { match: "Matched", turn: "Near the turn", mismatch: "Didn't match", none: "No verdict" };
 const WHY_WORDS = { above: "no prediction above Kholo Creek", swirl: "swirling", no_data: "no predictions for that time" };
 const verdictText = r => r.verdict === "none" ? `No verdict (${WHY_WORDS[r.why] || "none"})` : VERDICT_WORDS[r.verdict];
-const QTY_WORDS = { run_state: "Run", water_surface: "Water surface", high_water_time: "High water at" };
+const QTY_WORDS = { run_state: "Run", water_surface: "Water surface", mark_state: "Mark", high_water_time: "High water at" };
 const isoMs = iso => Date.parse((iso.length === 10 ? iso + "T00:00" : iso.replace(" ", "T").slice(0, 16)) + ":00Z");  // naive AEST read as UTC
 const fmtDate = iso => new Date(isoMs(iso)).toLocaleDateString("en-AU", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
 const fmtTime = iso => new Date(isoMs(iso)).toLocaleTimeString("en-AU", { timeZone: "UTC", hour: "numeric", minute: "2-digit" });
