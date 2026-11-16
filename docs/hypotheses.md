@@ -86,6 +86,14 @@ each time: a bridge pier, a rock, a post. Then:
    A day that doesn't count (below) gets `confidence` `excluded`. The results page
    works out the time from Bar high water and the result itself.
 
+Also worth doing (added 2026-11-16; a field method, not part of the test): with each
+photo, take a 10-second video zoomed in on a pier or post at the waterline. The water
+piles up against the face the flow hits, with short curved ripples wrapping round the
+corners, and leaves a smoother sheltered patch behind it, with streaks or foam peeling
+off downstream. Because the pattern stays with the pier, wind ripples drifting past don't
+fool it, so it shows which way the water is moving even in weak flow near the turn. Note
+which bank you filmed from. Send the direction as a flow report as usual.
+
 ### What would prove it wrong
 
 A test is **against H1** when the observed high water is more than 10 minutes outside
