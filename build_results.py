@@ -35,7 +35,9 @@ PCT_MIN = 5                # show a percentage once a reach has this many checka
 INDOOROOPILLY_KM = 37.6    # last station with an MSQ published ratio (stations.csv)
 # H1 (docs/hypotheses.md): high water above Kholo comes 1 to 3 min per km later than
 # MSQ's Kholo high water (150 min after the Bar's), up to km 83.7; 10 min allowance.
-H1 = {"id": "H1", "from_km": 75.8, "to_km": 83.7, "base_min": 150, "lo_per_km": 1.0,
+# Amended 2026-11-16: up to the bridge (km 83.81) when the Colleges Crossing run is
+# drowned at high water; the observer records only such tests above km 83.7.
+H1 = {"id": "H1", "from_km": 75.8, "to_km": 83.81, "base_min": 150, "lo_per_km": 1.0,
       "hi_per_km": 3.0, "allow_min": 10, "since": "2026-11-14"}
 
 

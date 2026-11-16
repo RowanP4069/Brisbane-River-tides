@@ -438,9 +438,10 @@ window.addEventListener("resize", () => {
     + "</tbody></table></div>";
   $("hypList").innerHTML = `<h3><span class="own">H1</span>: high water timing up to Colleges Crossing `
     + `<span class="muted">(under test since ${esc(fmtDate(h.since))})</span></h3>`
-    + `<p>Between Kholo Creek (km ${h.from_km}) and just below the Colleges Crossing run (km ${h.to_km}), high water comes `
+    + `<p>Between Kholo Creek (km ${h.from_km}) and the Colleges Crossing bridge (km ${h.to_km}; just below the run, km 83.7, `
+    + `when the run is not drowned), high water comes `
     + `${h.lo_per_km}–${h.hi_per_km} minutes per km later than at Kholo Creek, which is ${h.base_min} minutes after the Bar. `
-    + `Just below the run that is ${Math.round(h.base_min + h.lo_per_km * (h.to_km - h.from_km))}–`
+    + `At the bridge that is ${Math.round(h.base_min + h.lo_per_km * (h.to_km - h.from_km))}–`
     + `${Math.round(h.base_min + h.hi_per_km * (h.to_km - h.from_km))} minutes after Bar high water.</p>`
     + `<p class="tally">${esc(tally)}</p>${rows}`;
 }

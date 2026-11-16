@@ -108,7 +108,24 @@ These are set now, before any tests:
   seen*. That is neither for nor against H1. It is evidence about how far the tide
   reaches.
 - **Above km 83.7.** The Colleges Crossing run (km 83.8) separates two pools. H1 makes
-  no claim above it.
+  no claim above it. *Amended 2026-11-16, see below:* the reach now ends at the road
+  bridge (km 83.81) when the run is drowned at high water.
+
+### Amendment, 2026-11-16: up to the bridge when the run is drowned
+
+**Made after seeing the result it lets in.** The first test (2026-11-15) was taken on the
+bridge pier at km 83.80, on the run itself and 0.1 km above the original limit. The run
+had been drowned since about 11:15, so at high water the water under the bridge and
+the pool below it were one sheet of water and the run did not separate them. The
+project owner decided to count it.
+
+From 2026-11-16, H1 covers km 75.8 to **83.81** (the road bridge), but only on days when
+the Colleges Crossing run is seen to be drowned at high water. With the run running, the
+old limit of km 83.7 still applies. The window formula is unchanged: at the bridge,
+*d* = 8.0 and the window is 158–174 minutes after predicted Bar high water.
+
+Because this change was made after seeing a result, that first test should be weighed
+with care.
 
 ### Not covered by H1
 
