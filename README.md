@@ -86,9 +86,9 @@ A fourth page, **Report the flow**, lets people on the river report which way th
 - Above Kholo Creek the page shows the hypotheses under test (`docs/hypotheses.md`) with their running tallies.
 - [docs/report-form-setup.md](docs/report-form-setup.md) says how the Google Form and its sheet are set up, to check or rebuild them.
 
-## Guesswork (WAG): Kholo Creek to the weir ruin
+## Guesswork: Kholo Creek to the weir ruin
 
-A **sandbox**, not predictions: <https://rowanp4069.github.io/Brisbane-River-tides/guesswork.html> (kept out of search engines). It is the predictions page with the same model to Kholo Creek, carried on to the old weir ruin (km 87.4) with **guesses**, each named and dated in `data/guesses.csv`: G-lag and G-ratio (held at Kholo Creek's values), G-datum (Kholo Creek's LAT in m AHD, so heights can be read against the gauge and level marks) and G-floor (the crests of the gravel runs: above a run the water can't fall below its crest, and the bar shows it "running fresh"). Guess bars are pale and hatched; the project's own field observations are dark markers, with a list under the profile.
+A **sandbox**, not predictions (the "Guesses" link on every page): <https://rowanp4069.github.io/Brisbane-River-tides/guesswork.html> (kept out of search engines). It is the predictions page with the same model to Kholo Creek, carried on to the old weir ruin (km 87.4) with **guesses**, each named and dated in `data/guesses.csv`: G-lag and G-ratio (held at Kholo Creek's values), G-datum (Kholo Creek's LAT in m AHD, so heights can be read against the gauge and level marks) and G-floor (the crests of the gravel runs: above a run the water can't fall below its crest, and the bar shows it "running fresh"). Guess bars are pale and hatched; the project's own field observations are dark markers, with a list under the profile.
 
 - `river_tides.py --sandbox` builds it; the hosted site builds it with the other pages.
 - A guess tuned on a day's data can't count as a test on that day (`not_a_test_on`). Changing a guess means a new date on its row; git keeps the old value.

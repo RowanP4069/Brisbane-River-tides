@@ -54,7 +54,7 @@ jobs:
       # viewer's today, so a rebuild isn't needed to keep it current; the nightly run
       # refreshes the "Predictions built ... AEST" stamp (--stamp) and shows breakage early.
       - run: python river_tides.py --stamp --out site/index.html
-      # Guesswork (WAG): the same page and model, carried on above Kholo Creek with the
+      # Guesswork (the "Guesses" link): the same page and model, carried on above Kholo Creek with the
       # named guesses in data/guesses.csv. A sandbox: noindex, guesses not predictions.
       - run: python river_tides.py --sandbox --stamp --out site/guesswork.html
       # The gauges page fetches its readings live; this only builds the page itself.
