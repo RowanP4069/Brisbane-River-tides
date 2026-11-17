@@ -203,12 +203,12 @@ None. Stored exactly as returned. All processing happens in `build_centreline.py
 
 1. Segments are joined at shared end points into a network.
 2. The main stem is the shortest path from the mouth end (the network node nearest the gauge) to the node farthest along the network (152.69874 E, -27.50000, where the river leaves the download box, upstream of Mt Crosby). This drops 21 segments (5.49 km): side channels around islands, including the split channel near 152.79–152.80 E, -27.54 to -27.56, and pieces not connected to the main stem.
-3. A 1,131 m straight segment joins the gauge to the mouth end of the line.
+3. A 1,131 m straight segment joins the gauge to the mouth end of the line. It is then turned 28.2° about the mouth end, keeping its length, so its km 0 end is mid-channel at -27.398470, 153.153058 (towards -27.398662, 153.152957, a mid-river point picked from Google Maps on 2026-11-17; `KM0_TOWARD_*` in the script). The published gauge position is the end of the Whyte Island jetty, on the south-east edge of the channel, so the unturned segment hugged the south bank. Because the length is kept, chainage is unchanged everywhere: km 0 is still the gauge's distance along the river, and the gauge is about 550 m east of the drawn km 0. Stations are snapped to the unturned line, so the Bar stays at km 0.
 4. Chainage is cumulative length along the line on a local flat projection centred on 27.5 S (scale error under 0.2 % over this area).
 
-- Header: `lon,lat,chainage_km`. 957 vertices, ordered from the gauge upstream. Chainage 0 at the gauge, 116.74 km at the upstream end.
+- Header: `lon,lat,chainage_km`. 957 vertices, ordered from km 0 (mid-channel off the gauge, see step 3) upstream. Chainage 0 at the gauge, 116.74 km at the upstream end.
 - Gauge position: Brisbane Bar (Whyte Island), 27° 24.096′ S, 153° 9.444′ E, from https://www.qld.gov.au/environment/coasts-waterways/beach/tide-sites/brisbane-bar (checked 2026-11-07). An older position, -27.36666, 153.16666 ("West Inner Bar"), is listed by PSMSL and GLOSS (https://psmsl.org/data/obtaining/stations/822.php). It is rounded to whole arc-minutes, out in the bay about 4 km away, and appears to be historical.
-- SHA-256 (built 2026-11-07): `f5e7a1c26efcf37a7443080df86fe8e11a6b2c119f1f70fa21bff2b300d1588f`. Size 29,911 bytes.
+- SHA-256 (built 2026-11-17, with the turned km 0 segment): `df2d90fe07f60c0b344beb597e157cdfe08553339d0d26f2ae0eaf726a774cdd`. Size 29,911 bytes. Only the first row differs from the 2026-11-07 build (`f5e7a1c2…`).
 - Rebuild with `python build_centreline.py` (it reuses the saved download; `--fetch` downloads it again and replaces it). The output should match the checksum above.
 
 **Known limitations**

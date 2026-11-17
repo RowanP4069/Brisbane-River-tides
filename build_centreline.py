@@ -9,7 +9,9 @@ Steps:
   2. Join the segments into a network and take the shortest path from the river mouth
      to the most upstream point reached in the download box (this drops the duplicate
      channels around islands).
-  3. Add a straight segment from the mouth end of the line to the Brisbane Bar gauge.
+  3. Add a straight segment from the mouth end of the line to the Brisbane Bar gauge,
+     then turn it about the mouth end to point mid-river (see KM0_TOWARD_*). Its length,
+     and so every chainage, stays as measured to the gauge.
   4. Write data/centreline.csv: ordered lon, lat and chainage_km (0 = gauge).
   5. Snap each station in stations.csv onto the line and print a check report.
      stations.csv is only changed with --write-stations; review the report first.
@@ -52,6 +54,15 @@ BBOX = (152.70, -27.65, 153.25, -27.30)
 GAUGE_LON = 153 + 9.444 / 60
 GAUGE_LAT = -(27 + 24.096 / 60)
 
+# Mid-river point the km 0 end of the line is turned towards (Rowan, 2026-11-17, from
+# Google Maps). The published gauge position is the end of the Whyte Island jetty, on
+# the south-east edge of the channel, so a straight line from the river line's mouth
+# end to it hugs the south bank. Turning that segment (about 28 deg) towards this point
+# puts km 0 mid-channel, 24 m beyond it. The length is kept, so km 0 is still the
+# gauge's distance along the river; the gauge itself is ~550 m east of the new km 0.
+KM0_TOWARD_LON = 153.152957
+KM0_TOWARD_LAT = -27.398662
+
 R_EARTH = 6371.0088  # km, mean Earth radius
 LAT0 = -27.5         # reference latitude for the local flat projection
 
@@ -65,6 +76,28 @@ def to_xy(lon, lat):
     x = np.radians(lon) * R_EARTH * math.cos(math.radians(LAT0))
     y = np.radians(lat) * R_EARTH
     return x, y
+
+
+def from_xy(x, y):
+    """Inverse of to_xy: local flat x/y (km) -> lon/lat (degrees)."""
+    lon = math.degrees(x / (R_EARTH * math.cos(math.radians(LAT0))))
+    lat = math.degrees(y / R_EARTH)
+    return lon, lat
+
+
+def turn_km0(coords):
+    """Turn the first segment (gauge -> mouth end) about the mouth end so it points at
+    KM0_TOWARD_*, keeping its length. Returns the new coords."""
+    (gx, mx, tx), (gy, my, ty) = to_xy(
+        [coords[0][0], coords[1][0], KM0_TOWARD_LON], [coords[0][1], coords[1][1], KM0_TOWARD_LAT])
+    length = math.hypot(gx - mx, gy - my)
+    d = math.hypot(tx - mx, ty - my)
+    new = from_xy(mx + (tx - mx) / d * length, my + (ty - my) / d * length)
+    turn = math.degrees(math.atan2(ty - my, tx - mx) - math.atan2(gy - my, gx - mx))
+    print(f"km 0 turned {turn:.1f} deg towards mid-river: {new[1]:.6f}, {new[0]:.6f} "
+          f"({abs(length - d) * 1000:.0f} m from the target, "
+          f"{math.hypot(*np.subtract(to_xy(*new), (gx, gy))) * 1000:.0f} m from the gauge)")
+    return [new] + coords[1:]
 
 
 def fetch(path):
@@ -284,6 +317,13 @@ def main():
     print(f"Upstream end: {top[0]:.5f}, {top[1]:.5f}")
 
     ch = chainage(coords)
+    # Stations are snapped to the line as measured to the gauge (below), so the Bar
+    # stays at km 0; only the drawn line is turned.
+    gauge_coords = coords
+    coords = turn_km0(coords)
+    ch_turned = chainage(coords)
+    if np.abs(ch_turned - ch).max() > 1e-9:
+        raise SystemExit("Turning km 0 changed the chainage; it must not")
     print(f"Centreline: {len(coords)} vertices, {ch[-1]:.2f} km gauge -> upstream end")
 
     with open(OUT, "w", newline="", encoding="utf-8") as f:
@@ -293,7 +333,7 @@ def main():
             w.writerow([f"{lon:.6f}", f"{lat:.6f}", f"{c:.4f}"])
     print(f"Wrote {OUT}")
 
-    new_ch, order_ok = station_report(coords, ch, a.stations)
+    new_ch, order_ok = station_report(gauge_coords, ch, a.stations)
     if a.write_stations:
         if not order_ok:
             raise SystemExit("Not writing stations.csv: chainage order does not match the file.")
