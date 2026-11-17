@@ -449,6 +449,8 @@ function makeCallout(s, colour, border) {
   return { s, line, dot, label, w: 0, h: 0 };
 }
 const callouts = !map ? [] : DATA.stations.map(s => makeCallout(s, "#1d2329", "rgba(29,35,41,.35)"));
+// Each station's model point, so a mark there can take over the station's label.
+for (const c of callouts) c.p = nearestPoint(c.s.chainage_km);
 // The marked place's label: placed first, so it gets the shortest leader.
 const markCallout = !map ? null : makeCallout({ name: "", lon: 0, lat: 0 }, MARK_CSS, MARK_CSS);
 function layoutCallouts() {
@@ -458,12 +460,15 @@ function layoutCallouts() {
     const p = map.project([c.s.lon, c.s.lat]);
     return { c, x: p.x, y: p.y };
   };
-  const items = callouts.map(measure).sort((a, b) => a.x - b.x);
   const hasMark = state.mark != null;
+  // A mark on a station's point replaces that station's own label (no double label).
+  const atStation = hasMark ? callouts.find(c => c.p === state.mark) : undefined;
+  if (atStation) for (const el of [atStation.line, atStation.dot, atStation.label]) el.style.display = "none";
+  const items = callouts.filter(c => c !== atStation).map(measure).sort((a, b) => a.x - b.x);
   for (const el of [markCallout.line, markCallout.dot, markCallout.label]) el.style.display = hasMark ? "" : "none";
   if (hasMark) {
     const p = state.mark, pl = state.markPlace != null ? PLACES[state.markPlace] : null;
-    const name = pl ? pl.name : `km ${fmtKm(P.chainage_km[p])}`;
+    const name = pl ? pl.name : atStation ? atStation.s.name : `km ${fmtKm(P.chainage_km[p])}`;
     if (markCallout.label.textContent !== name) { markCallout.label.textContent = name; markCallout.w = 0; }
     markCallout.s = { lon: P.lon[p], lat: P.lat[p] };
     items.unshift(measure(markCallout));
