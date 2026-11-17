@@ -220,8 +220,17 @@ def station_labels(st, centreline_path):
             for n, s, c, x, y in zip(st.name, short, st.chainage_km, lon, lat)]
 
 
+def ramp_places(path, end_km):
+    """Boat ramps from data/ramps.csv inside the predicted reach (km 0 to end_km), for
+    the page's Place list. Location references only: name and chainage, as on the
+    report page."""
+    r = pd.read_csv(path)
+    r = r[(r.km >= 0) & (r.km <= end_km)].sort_values("km")
+    return [{"name": n, "chainage_km": round(float(k), 2)} for n, k in zip(r.name, r.km)]
+
+
 def build_payload(frames, pts, h, bar_msl, step_min, stations, full_bar, hours,
-                  start_is_default, built=None):
+                  start_is_default, built=None, ramps=()):
     """Everything the page needs, as plain lists (JSON-ready). Becomes DATA in the page.
 
     The page computes heights itself for whichever day the viewer picks, from "model":
@@ -237,6 +246,7 @@ def build_payload(frames, pts, h, bar_msl, step_min, stations, full_bar, hours,
     day if one was given, otherwise on the viewer's today (Brisbane).
     built: when the page was made, as a naive AEST Timestamp, or None to leave the
     stamp out (the default, so repeat runs give byte-identical output).
+    ramps: boat ramps for the page's Place list (see ramp_places).
 
     Rounding in "points" (for display): chainage to 1 m, lon/lat to 6 decimals (~0.1 m),
     lag to 0.1 min, ratio to 4 decimals; "heights" to 1 mm. Finer than the model's
@@ -279,6 +289,7 @@ def build_payload(frames, pts, h, bar_msl, step_min, stations, full_bar, hours,
         # these, so change both together.
         "times": [t.strftime("%Y-%m-%dT%H:%M") for t in frames],
         "stations": stations,
+        "ramps": list(ramps),
         "points": {
             "chainage_km": pts.chainage_km.round(3).tolist(),
             "lon": pts.lon.round(6).tolist(),
@@ -339,6 +350,8 @@ def main():
                          "window evenly, the window ends on the last whole step")
     ap.add_argument("--spacing-km", type=float, default=0.5,
                     help="distance between bars along the river, km (default: 0.5)")
+    ap.add_argument("--ramps", default=str(DATA / "ramps.csv"),
+                    help="boat ramps for the page's Place list (default: data/)")
     ap.add_argument("--out", default=str(HERE / "output" / "index.html"),
                     help="page to write (default: output/index.html, as on the website)")
     ap.add_argument("--template", default=str(HERE / "web" / "predictions_template.html"),
@@ -386,7 +399,8 @@ def main():
     built = pd.Timestamp.now(tz=BRISBANE).tz_localize(None) if args.stamp else None
     payload = build_payload(frames, pts, h, bar_msl, args.step_min,
                             station_labels(st, args.centreline), full, args.hours,
-                            start_is_default, built)
+                            start_is_default, built,
+                            ramp_places(args.ramps, pts.chainage_km.max()))
     write_html(payload, args.template, args.out)
     print("Wrote", args.out)
     if args.json:

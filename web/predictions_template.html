@@ -42,7 +42,17 @@
     font-size:11px; color:var(--muted); background:var(--panel); }
   #profileKey svg { vertical-align:-1px; margin-right:3px; }
   #profileWrap { position:relative; flex: 0 0 30vh; min-height:200px; background:var(--panel); }
-  #profile { width:100%; height:100%; display:block; }
+  /* pan-y: on a touch screen, a sideways drag moves the marker, an up/down one scrolls. */
+  #profile { width:100%; height:100%; display:block; touch-action:pan-y; }
+  #markRow { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; padding:6px 16px 0;
+    font-size:12px; color:var(--muted); background:var(--panel); }
+  /* Place list and its × stay on one line; the list shrinks on narrow screens. */
+  #placeBox { display:flex; gap:8px; align-items:center; min-width:0; max-width:100%; }
+  #placeBox label { display:flex; gap:6px; align-items:center; min-width:0; }
+  #markRow select { font:inherit; min-width:0; max-width:100%; }
+  #markInfo { color:var(--fg); font-variant-numeric:tabular-nums; }
+  #markInfo b { color:#762a83; }
+  #markClear { font:inherit; padding:0 6px; }
   #ptip { position:absolute; pointer-events:none; background:rgba(29,35,41,.92); color:#fff; padding:4px 8px;
     border-radius:4px; font-size:12px; display:none; white-space:nowrap; }
   footer { padding:6px 16px 10px; font-size:11px; color:var(--muted); }
@@ -102,6 +112,16 @@
   <div id="legend"></div>
 </div>
 
+<!-- Marked place: picked here, or by tapping the profile or a bar on the map. -->
+<div id="markRow">
+  <span id="placeBox">
+    <label>Place
+      <select id="place" aria-label="Mark a place"><option value="">tap the chart or a bar to mark a place</option></select>
+    </label>
+    <button id="markClear" type="button" title="Clear the marked place" aria-label="Clear the marked place" hidden>×</button>
+  </span>
+  <span id="markInfo"></span>
+</div>
 <!-- Key to the profile below; the window length is filled in by renderSubtitle(). -->
 <div id="profileKey">
   <span><svg width="22" height="10" aria-hidden="true"><rect y="1" width="22" height="8" fill="rgba(31,111,178,.2)"/></svg>
@@ -109,6 +129,7 @@
   <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#174f80" stroke-width="2"/></svg> highest</span>
   <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#174f80" stroke-width="2" stroke-dasharray="5 3"/></svg> lowest</span>
   <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#1d2329" stroke-width="1.5"/></svg> level at the time shown</span>
+  <span><svg width="22" height="10" aria-hidden="true"><line x1="11" y1="0" x2="11" y2="10" stroke="#762a83" stroke-width="2"/></svg> marked place</span>
 </div>
 <div id="profileWrap"><canvas id="profile"></canvas><div id="ptip"></div></div>
 
@@ -291,6 +312,8 @@ const COLOURS = {
   slope: (f, p) => diverge(slope[f][p], SLOPE_MAX),
 };
 const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+// The marked place: a purple used by nothing else on the page.
+const MARK_RGB = [118, 42, 131], MARK_CSS = css(MARK_RGB);
 
 function renderLegend() {
   const el = document.getElementById("legend");
@@ -310,8 +333,10 @@ function renderLegend() {
 const $ = id => document.getElementById(id);
 // exag: map bar height = height (m) x exag, so at the default 2000, 1 m of tide draws
 // as a 2 km column. Read from the slider so the HTML value="..." is the only default.
+// mark: index of the marked model point, or null; markPlace: index into PLACES when the
+// mark came from the Place list (or a link to that place's km), else null.
 const state = { frame: 0, colour: "dir", base: "lat", exag: +$("exag").value, playing: false,
-                day: 0, hours: 48 };
+                day: 0, hours: 48, mark: null, markPlace: null };
 const slider = $("slider");
 
 // Window length: the 24/48 h choices, plus river_tides.py --hours if it's another value.
@@ -321,10 +346,16 @@ if (![...hoursSel.options].some(o => +o.value === DATA.meta.hours)) {
 }
 state.hours = DATA.meta.hours;
 hoursSel.value = String(DATA.meta.hours);
-// Opening day: from the address (#YYYY-MM-DD) if valid; else river_tides.py --start if
-// one was given; else today in Brisbane. Moved into range if needed.
-function dayFromHash() { return dayFromText(location.hash.slice(1)); }
-const hashDay = dayFromHash();
+// The address: #YYYY-MM-DD, optionally followed by /km<chainage> for a marked place,
+// e.g. #2026-11-17/km2.5. Either part may be missing or invalid (then NaN).
+function parseHash() {
+  const [d = "", k = ""] = location.hash.slice(1).split("/");
+  return { day: dayFromText(d), km: /^km\d+(\.\d+)?$/.test(k) ? +k.slice(2) : NaN };
+}
+// Opening day: from the address if valid; else river_tides.py --start if one was given;
+// else today in Brisbane. Moved into range if needed.
+// Read the marked place now too: setting up the window rewrites the address.
+const { day: hashDay, km: hashKm } = parseHash();
 state.day = clampDay(!isNaN(hashDay) ? hashDay
   : DATA.meta.start_is_default ? brisbaneToday() : isoMs(DATA.meta.start) - TOD_MS, state.hours);
 setWindow(state.day + TOD_MS, state.hours);
@@ -403,27 +434,40 @@ const svgNS = "http://www.w3.org/2000/svg", leaderSvg = document.createElementNS
 leaderSvg.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
 calloutLayer.appendChild(leaderSvg);
 if (map) mapEl.appendChild(calloutLayer);
-const callouts = !map ? [] : DATA.stations.map(s => {
+function makeCallout(s, colour, border) {
   const line = document.createElementNS(svgNS, "line");
-  line.setAttribute("stroke", "rgba(29,35,41,.7)"); line.setAttribute("stroke-width", "1.2");
+  line.setAttribute("stroke", colour); line.setAttribute("stroke-width", "1.2");
   const dot = document.createElementNS(svgNS, "circle");
-  dot.setAttribute("r", "4"); dot.setAttribute("fill", "#1d2329");
+  dot.setAttribute("r", "4"); dot.setAttribute("fill", colour);
   dot.setAttribute("stroke", "#fff"); dot.setAttribute("stroke-width", "1.5");
   leaderSvg.append(line, dot);
   const label = document.createElement("div");
   label.textContent = s.name;
-  label.style.cssText = "position:absolute;font:12px system-ui,sans-serif;color:#1d2329;background:rgba(255,255,255,.93);"
-    + "border:1px solid rgba(29,35,41,.35);border-radius:3px;padding:1px 5px;white-space:nowrap";
+  label.style.cssText = `position:absolute;font:12px system-ui,sans-serif;color:${colour};background:rgba(255,255,255,.93);`
+    + `border:1px solid ${border};border-radius:3px;padding:1px 5px;white-space:nowrap`;
   calloutLayer.appendChild(label);
   return { s, line, dot, label, w: 0, h: 0 };
-});
+}
+const callouts = !map ? [] : DATA.stations.map(s => makeCallout(s, "#1d2329", "rgba(29,35,41,.35)"));
+// The marked place's label: placed first, so it gets the shortest leader.
+const markCallout = !map ? null : makeCallout({ name: "", lon: 0, lat: 0 }, MARK_CSS, MARK_CSS);
 function layoutCallouts() {
   const W = mapEl.clientWidth, Hm = mapEl.clientHeight, placed = [];
-  const items = callouts.map(c => {
+  const measure = c => {
     if (!c.w) { c.w = c.label.offsetWidth; c.h = c.label.offsetHeight; }
     const p = map.project([c.s.lon, c.s.lat]);
     return { c, x: p.x, y: p.y };
-  }).sort((a, b) => a.x - b.x);
+  };
+  const items = callouts.map(measure).sort((a, b) => a.x - b.x);
+  const hasMark = state.mark != null;
+  for (const el of [markCallout.line, markCallout.dot, markCallout.label]) el.style.display = hasMark ? "" : "none";
+  if (hasMark) {
+    const p = state.mark, pl = state.markPlace != null ? PLACES[state.markPlace] : null;
+    const name = pl ? pl.name : `km ${fmtKm(P.chainage_km[p])}`;
+    if (markCallout.label.textContent !== name) { markCallout.label.textContent = name; markCallout.w = 0; }
+    markCallout.s = { lon: P.lon[p], lat: P.lat[p] };
+    items.unshift(measure(markCallout));
+  }
   for (const it of items) {
     const { c, x, y } = it;
     const show = x > -EDGE_PX && x < W + EDGE_PX && y > -EDGE_PX && y < Hm + EDGE_PX;
@@ -457,7 +501,15 @@ const idx = Array.from({ length: NP }, (_, i) => i);
 const BAR_RADIUS_M = 0.34 * SPACING_M;
 function layers() {
   const base = BASES[state.base], colourFn = COLOURS[state.colour], f = state.frame;
+  // The marked place: a ring on the ground around its bar (drawn first, under the bars).
+  const mark = state.mark == null ? [] : [new deck.ScatterplotLayer({
+    id: "mark", data: [state.mark], getPosition: i => [P.lon[i], P.lat[i]],
+    radiusUnits: "meters", getRadius: 2 * BAR_RADIUS_M, radiusMinPixels: 9,
+    stroked: true, filled: true, getFillColor: [...MARK_RGB, 50], getLineColor: [...MARK_RGB, 255],
+    lineWidthUnits: "pixels", getLineWidth: 3,
+  })];
   return [
+    ...mark,
     new deck.ColumnLayer({
       // diskResolution 12: each column is a 12-sided prism (round enough, cheap to draw).
       id: "bars", data: idx, diskResolution: 12, radius: BAR_RADIUS_M, extruded: true, pickable: true,
@@ -478,6 +530,8 @@ if (map) {
     overlay = new deck.MapboxOverlay({
       interleaved: false, layers: layers(),
       getTooltip: ({ index, layer }) => layer && layer.id === "bars" && index >= 0 ? { text: tipText(state.frame, index) } : null,
+      // Clicking a bar marks that place.
+      onClick: ({ index, layer }) => { if (layer && layer.id === "bars" && index >= 0) setMark(index); },
     });
     map.addControl(overlay);
   } catch (err) {
@@ -584,6 +638,15 @@ function drawProfile() {
   for (let p = 0; p < NP; p++) { const x = X(P.chainage_km[p]), y = Y(base.f(f, p)); p ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
   ctx.stroke();
 
+  // Marked place: a vertical line, with a handle (a small triangle) in the top margin.
+  if (state.mark != null) {
+    const x = X(P.chainage_km[state.mark]);
+    ctx.strokeStyle = MARK_CSS; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, PAD.t); ctx.lineTo(x, Ht - PAD.b); ctx.stroke();
+    ctx.fillStyle = MARK_CSS; ctx.beginPath();
+    ctx.moveTo(x - 6, 1); ctx.lineTo(x + 6, 1); ctx.lineTo(x, PAD.t); ctx.closePath(); ctx.fill();
+  }
+
   // x axis: km ticks every 10 km above the station names
   ctx.fillStyle = "#5d6873"; ctx.strokeStyle = "#9aa4ad"; ctx.lineWidth = 1; ctx.textAlign = "center";
   for (let km = 10; km <= KM_MAX; km += 10) ctx.fillText(km, X(km), Ht - PAD.b + 12);
@@ -604,18 +667,38 @@ function drawProfile() {
 }
 // Tooltip for the point nearest the pointer. Pointer events cover mouse, touch and pen;
 // pointerdown makes a tap on a touch screen show it too.
+// km under the pointer (the axis runs right to left).
+function kmAtPointer(e) {
+  const r = cv.getBoundingClientRect();
+  return (1 - (e.clientX - r.left - PAD.l) / (r.width - PAD.l - PAD.r)) * KM_MAX;
+}
 function showProfileTip(e) {
-  const r = cv.getBoundingClientRect(), x = e.clientX - r.left;
-  const km = (1 - (x - PAD.l) / (r.width - PAD.l - PAD.r)) * KM_MAX;   // axis runs right to left
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, km = kmAtPointer(e);
   if (km < 0 || km > KM_MAX) { ptip.style.display = "none"; return; }
-  let p = 0, best = Infinity;               // nearest point (a plain search; NP is small)
-  for (let i = 0; i < NP; i++) { const d = Math.abs(P.chainage_km[i] - km); if (d < best) { best = d; p = i; } }
+  const p = nearestPoint(km);
   ptip.textContent = tipText(state.frame, p).replace(/\n/g, "  ·  ");
   ptip.style.display = "block";
   ptip.style.left = Math.max(4, Math.min(x + 12, r.width - ptip.offsetWidth - 4)) + "px"; ptip.style.top = "6px";
 }
-cv.addEventListener("pointermove", showProfileTip);
-cv.addEventListener("pointerdown", showProfileTip);
+// Press (tap or click) on the chart marks that point; dragging moves the mark, even past
+// the chart's ends (clamped), until the pointer is released.
+let draggingMark = false;
+cv.addEventListener("pointerdown", e => {
+  const km = kmAtPointer(e);
+  if (km >= 0 && km <= KM_MAX) {
+    draggingMark = true; cv.setPointerCapture(e.pointerId);
+    setMark(nearestPoint(km));
+  }
+  showProfileTip(e);
+});
+cv.addEventListener("pointermove", e => {
+  if (draggingMark) {
+    const p = nearestPoint(Math.max(0, Math.min(KM_MAX, kmAtPointer(e))));
+    if (p !== state.mark || state.markPlace != null) setMark(p);
+  }
+  showProfileTip(e);
+});
+for (const ev of ["pointerup", "pointercancel"]) cv.addEventListener(ev, () => { draggingMark = false; });
 cv.addEventListener("pointerleave", () => { ptip.style.display = "none"; });
 
 // ---- Wiring -------------------------------------------------------------------------
@@ -626,6 +709,7 @@ function update() {
   const t = frameMs();
   $("back1h").disabled = t - HOUR_MS < FIRST_DAY + TOD_MS;
   $("fwd1h").disabled = t + HOUR_MS > lastDay(state.hours) + TOD_MS + (NF - 1) * STEP_MS;
+  $("markInfo").innerHTML = markText();
   if (overlay) overlay.setProps({ layers: layers() });
   drawProfile();
 }
@@ -633,6 +717,73 @@ slider.addEventListener("input", () => { state.frame = +slider.value; update(); 
 $("colour").addEventListener("change", e => { state.colour = e.target.value; renderLegend(); update(); });
 $("base").addEventListener("change", e => { state.base = e.target.value; update(); });
 $("exag").addEventListener("input", e => { state.exag = +e.target.value; update(); });
+
+// ---- Marked place -------------------------------------------------------------------
+// One model point marked on the profile (a purple line) and the map (a purple ring and
+// label). Set by the Place list, a tap or drag on the profile, a click on a bar, or a
+// link (#YYYY-MM-DD/km2.5). It snaps to the nearest model point, so the readout shows
+// the model's own values there; a ramp keeps its own km in the label and the link.
+const PLACES = [
+  ...DATA.stations.map(s => ({ name: s.name, km: s.chainage_km, group: "Tide stations (MSQ)" })),
+  ...(DATA.ramps || []).map(r => ({ name: r.name, km: r.chainage_km, group: "Boat ramps" })),
+];
+const placeSel = $("place");
+for (const g of [...new Set(PLACES.map(pl => pl.group))]) {
+  const og = document.createElement("optgroup"); og.label = g;
+  PLACES.forEach((pl, i) => { if (pl.group === g) og.append(new Option(`${pl.name} (km ${fmtKm(pl.km)})`, i)); });
+  placeSel.append(og);
+}
+function fmtKm(km) { return String(+km.toFixed(2)); }          // 2.5, 9.34, 0
+function nearestPoint(km) {
+  let p = 0, best = Infinity;               // a plain search; NP is small
+  for (let i = 0; i < NP; i++) { const d = Math.abs(P.chainage_km[i] - km); if (d < best) { best = d; p = i; } }
+  return p;
+}
+const markKm = () => state.markPlace != null ? PLACES[state.markPlace].km : P.chainage_km[state.mark];
+function writeHash() {
+  const h = "#" + dayText(state.day) + (state.mark != null ? "/km" + fmtKm(markKm()) : "");
+  if (location.hash !== h) history.replaceState(null, "", h);
+}
+function setMark(p, placeIdx = null) {
+  state.mark = p; state.markPlace = p == null ? null : placeIdx;
+  placeSel.value = state.markPlace != null ? String(state.markPlace) : "";
+  $("markClear").hidden = p == null;
+  writeHash(); update();
+  if (map) layoutCallouts();
+}
+// From a km (e.g. the address): a place whose km matches keeps its name.
+function markAtKm(km) {
+  if (!(km >= 0 && km <= KM_MAX + 0.25)) return false;
+  const i = PLACES.findIndex(pl => Math.abs(pl.km - km) < 0.005);
+  setMark(nearestPoint(km), i >= 0 ? i : null);
+  return true;
+}
+placeSel.addEventListener("change", () => {
+  const i = placeSel.value === "" ? null : +placeSel.value;
+  if (i == null) setMark(null); else setMark(nearestPoint(PLACES[i].km), i);
+});
+$("markClear").addEventListener("click", () => setMark(null));
+// "Mon 14:10" from "YYYY-MM-DDTHH:MM" (weekday from the date, as in fmtTime).
+const fmtDayTime = iso => new Date(iso + ":00").toLocaleDateString("en-AU", { weekday: "short" }) + " " + iso.slice(11, 16);
+// Readout for the marked point at the current frame (HTML; place names are our own data
+// but are escaped anyway).
+function markText() {
+  const p = state.mark;
+  if (p == null) return "";
+  const esc = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const pl = state.markPlace != null ? PLACES[state.markPlace] : null;
+  const where = pl ? `${esc(pl.name)}, km ${fmtKm(pl.km)}` : `km ${fmtKm(P.chainage_km[p])}`;
+  const r = rate[state.frame][p];
+  const trend = r > SLACK_M_PER_H ? `rising ${r.toFixed(2)} m/h`
+    : r < -SLACK_M_PER_H ? `falling ${(-r).toFixed(2)} m/h` : "near slack";
+  let hi = 0, lo = 0;
+  for (let f = 1; f < NF; f++) { if (H[f][p] > H[hi][p]) hi = f; if (H[f][p] < H[lo][p]) lo = f; }
+  // Highest or lowest on the first or last frame: the turn may lie outside the window.
+  const edge = f => f === 0 || f === NF - 1 ? " (window edge)" : "";
+  return `<b>${where}</b> · ${H[state.frame][p].toFixed(2)} m above LAT, ${trend}`
+    + ` · highest ${H[hi][p].toFixed(2)} m ${fmtDayTime(TIMES[hi])}${edge(hi)}`
+    + ` · lowest ${H[lo][p].toFixed(2)} m ${fmtDayTime(TIMES[lo])}${edge(lo)}`;
+}
 
 // Day and window length. Changing day keeps the frame number, so the clock time stays
 // the same (every window starts at the same time of day). The day goes in the address
@@ -649,7 +800,7 @@ function applyWindow(day, hours) {
   dateInput.value = dayText(state.day);
   $("prevDay").disabled = state.day <= FIRST_DAY;
   $("nextDay").disabled = state.day >= lastDay(hours);
-  if (location.hash !== "#" + dayText(state.day)) history.replaceState(null, "", "#" + dayText(state.day));
+  writeHash();
   renderSubtitle(); renderLegend(); update();
 }
 $("prevDay").addEventListener("click", () => applyWindow(state.day - DAY_MS, state.hours));
@@ -663,8 +814,10 @@ dateInput.addEventListener("change", () => {
 });
 hoursSel.addEventListener("change", () => applyWindow(state.day, +hoursSel.value));
 window.addEventListener("hashchange", () => {
-  const d = dayFromHash();
+  const { day: d, km } = parseHash();
   if (!isNaN(d) && d !== state.day) applyWindow(d, state.hours);
+  if (!isNaN(km)) { if (state.mark == null || Math.abs(km - markKm()) > 0.005) markAtKm(km); }
+  else if (state.mark != null) setMark(null);
 });
 
 // Now and ±1 h. Times here are naive AEST read as UTC, like isoMs(). goToTime() keeps
@@ -721,6 +874,7 @@ document.addEventListener("keydown", e => {
 window.addEventListener("resize", () => { sizeCanvas(); drawProfile(); });
 
 sizeCanvas(); applyWindow(state.day, state.hours);
+markAtKm(hashKm);                           // a marked place from the address, if any
 </script>
 </body>
 </html>
