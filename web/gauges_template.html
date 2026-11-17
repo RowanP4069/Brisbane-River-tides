@@ -140,7 +140,14 @@ const GAP_MAX_MS = 60 * MIN_MS;
 const gapMax = g => GAUGES[g].gap_max_min ? GAUGES[g].gap_max_min * MIN_MS : GAP_MAX_MS;
 // At or below a gauge's floor (Colleges Crossing: 0.59 m) the water may be lower still.
 const atFloor = (g, v) => GAUGES[g].floor_m != null && v <= GAUGES[g].floor_m + 1e-9;
-const RATE_HALF_MS = 15 * MIN_MS;   // rising/falling from the change over +-15 min
+// Rising/falling: the slope of a straight line fitted to the readings within RATE_FIT_MS
+// either side (at least RATE_MIN_N of them, spanning at least RATE_MIN_SPAN_MS). Readings
+// jitter by 1-4 cm near high and low water, and a change between just two points 30 min
+// apart flipped the colour back and forth there (2026-11-17: up to 18 direction changes in
+// 72 h where the tide turned 11-12 times; the fit gives 11-12). Where there are too few
+// readings, the change over +-RATE_HALF_MS of the bridged line is used instead.
+const RATE_FIT_MS = 45 * MIN_MS, RATE_MIN_N = 3, RATE_MIN_SPAN_MS = 15 * MIN_MS;
+const RATE_HALF_MS = 15 * MIN_MS;
 
 function fmtTime(ms) {               // "Sun, 8 Nov 15:45" in AEST
   const d = new Date(ms + AEST_MS);
@@ -247,6 +254,23 @@ function valueAt(g, t) {
   return v0 + (v1 - v0) * (t - t0) / (t1 - t0);
 }
 
+// Least-squares slope (m/h) of gauge g's readings within RATE_FIT_MS of t, or NaN if
+// there are too few of them.
+function fittedRate(g, t) {
+  const s = series[g];
+  let lo = 0, hi = s.length;                       // first reading at or after t - RATE_FIT_MS
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (s[mid][0] < t - RATE_FIT_MS) lo = mid + 1; else hi = mid; }
+  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0, first = NaN, last = NaN;
+  for (let i = lo; i < s.length && s[i][0] <= t + RATE_FIT_MS; i++) {
+    const x = (s[i][0] - t) / 3600000, y = s[i][1];
+    n++; sx += x; sy += y; sxx += x * x; sxy += x * y;
+    if (n === 1) first = s[i][0];
+    last = s[i][0];
+  }
+  if (n < RATE_MIN_N || last - first < RATE_MIN_SPAN_MS) return NaN;
+  return (n * sxy - sx * sy) / (n * sxx - sx * sx);
+}
+
 // ---- The window shown ---------------------------------------------------------------
 // It ends at the time at least half the gauges have reached (the lower median of their
 // latest-reading times) and runs back state.hours from there. Each gauge's latest
@@ -272,8 +296,11 @@ function setWindow(hours) {
   TIMES = []; for (let t = startMs; t <= endMs; t += STEP_MS) TIMES.push(t);
   NF = TIMES.length;
   H = TIMES.map(t => GAUGES.map((_, g) => valueAt(g, t)));
-  // rate[f][g], m/h, from about 15 min either side (one-sided at the window ends).
-  rate = TIMES.map(t => GAUGES.map((_, g) => {
+  // rate[f][g], m/h (see RATE_FIT_MS). NaN where it can't be worked out.
+  rate = TIMES.map((t, f) => GAUGES.map((_, g) => {
+    if (!Number.isFinite(H[f][g])) return NaN;
+    const fit = fittedRate(g, t);
+    if (Number.isFinite(fit)) return fit;
     const a = Math.max(startMs, t - RATE_HALF_MS), b = Math.min(endMs, t + RATE_HALF_MS);
     return (valueAt(g, b) - valueAt(g, a)) / ((b - a) / 3600000);
   }));
@@ -298,10 +325,12 @@ function setWindow(hours) {
 // ---- Colours (as the predictions page) ----------------------------------------------
 const RED = [178, 24, 43], BLUE = [33, 102, 172], MID = [235, 235, 235];
 const C_RISE = [214, 96, 77], C_FALL = [67, 147, 195], C_SLACK = [170, 170, 170];
-const C_NONE = [215, 215, 215];     // no reading
-// |dh/dt| below 2 cm/h is "near slack". The readings are whole centimetres, so over
-// 30 minutes a 1 cm change (2 cm/h) still counts as slack.
-const SLACK_M_PER_H = 0.02;
+// No reading: very pale, so it isn't mistaken for the slack grey. A level with no rate
+// (too few readings around it to tell the direction): its own pale lilac.
+const C_NONE = [240, 240, 240], C_UNKNOWN = [214, 204, 232];
+// |dh/dt| below 3 cm/h is "near slack". Higher than the predictions page's 2 cm/h:
+// measured readings wobble by a centimetre or two, the predicted curve doesn't.
+const SLACK_M_PER_H = 0.03;
 function diverge(v, max) {
   const t = Math.max(-1, Math.min(1, v / max));
   const end = t >= 0 ? RED : BLUE, k = Math.abs(t);
@@ -309,15 +338,17 @@ function diverge(v, max) {
 }
 const C_FLOOR = [236, 230, 214];   // at a gauge's floor: the level may be lower
 const COLOURS = {
-  dir: (f, g) => Number.isFinite(H[f][g]) && atFloor(g, H[f][g]) ? C_FLOOR : !Number.isFinite(rate[f][g]) ? C_NONE
+  dir: (f, g) => !Number.isFinite(H[f][g]) ? C_NONE : atFloor(g, H[f][g]) ? C_FLOOR
+    : !Number.isFinite(rate[f][g]) ? C_UNKNOWN
     : rate[f][g] > SLACK_M_PER_H ? C_RISE : rate[f][g] < -SLACK_M_PER_H ? C_FALL : C_SLACK,
-  rate: (f, g) => Number.isFinite(H[f][g]) && atFloor(g, H[f][g]) ? C_FLOOR
-    : !Number.isFinite(rate[f][g]) ? C_NONE : diverge(rate[f][g], RATE_MAX),
+  rate: (f, g) => !Number.isFinite(H[f][g]) ? C_NONE : atFloor(g, H[f][g]) ? C_FLOOR
+    : !Number.isFinite(rate[f][g]) ? C_UNKNOWN : diverge(rate[f][g], RATE_MAX),
 };
 const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 function renderLegend() {
   const el = $("legend");
-  const none = `<span><span class="sw" style="background:${css(C_NONE)}"></span>no reading</span>`
+  const none = `<span><span class="sw" style="background:${css(C_NONE)};outline:1px solid #c5ccd2"></span>no reading</span>`
+    + `<span><span class="sw" style="background:${css(C_UNKNOWN)}"></span>direction unknown</span>`
     + `<span><span class="sw" style="background:${css(C_FLOOR)};outline:1px solid #9aa4ad"></span>at gauge floor</span>`;
   if (state.colour === "dir") {
     el.innerHTML = `<span><span class="sw" style="background:${css(C_RISE)}"></span>rising</span>
@@ -461,7 +492,7 @@ function tipText(f, g) {
   if (atFloor(g, v)) return `${head}\n${v.toFixed(2)} m AHD or lower: the gauge reads nothing below ${G.floor_m.toFixed(2)} m${held}`;
   if (held) return `${head}\n${v.toFixed(2)} m AHD${held}`;
   return `${head}\n${v.toFixed(2)} m AHD   ${(v - BASES.mean.mean[g]).toFixed(2)} m vs window mean\n`
-    + (Number.isFinite(r) ? `rate ${r >= 0 ? "+" : ""}${r.toFixed(2)} m/h` : "rate: not enough readings");
+    + (Number.isFinite(r) ? `rate ${r >= 0 ? "+" : ""}${r.toFixed(2)} m/h` : "direction unknown: too few readings around this time");
 }
 
 // ---- Profile ------------------------------------------------------------------------
