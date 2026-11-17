@@ -31,8 +31,8 @@ The one-resource-per-year layout means a year change still needs the new resourc
 ## Item 13: 2027 notes
 
 - **Predictions:** see the table above.
-- **Tidal planes:** the 2027 PDF is linked from <https://www.msq.qld.gov.au/tides/tidal-planes>. The Brisbane River rows are on page 2, and at a glance they match 2026. The Indooroopilly / Seventeen Mile Rocks lag reversal is still there (Indooroopilly +1:20 / +1:45, Seventeen Mile Rocks +1:20 / +1:20).
-- **Bar MSL:** MSQ's tidal datum page gives a Bar MSL of **1.351 m** "used for the tidal predictions for 2027", while the planes table still lists 1.32 m. That affects the anomaly baseline (`MSL_Bar`). Decide which to use in item 13.
+- **Tidal planes:** the 2027 PDF is linked from <https://www.msq.qld.gov.au/tides/tidal-planes>. The Brisbane River rows are on page 2, and at a glance they match 2026. The Indooroopilly / Seventeen Mile Rocks lag reversal is still there (Indooroopilly +1:20 / +1:45, Seventeen Mile Rocks +1:20 / +1:20). **Adopted 2026-11-17:** a full check found every Brisbane River row identical to 2026 in every column, so `stations.csv` is unchanged apart from its source (see `data/README.md`). MSQ's site refuses scripted downloads (HTTP 403), so the PDF has to be saved from a browser.
+- **Bar MSL:** MSQ's tidal datum page gives a Bar MSL of **1.351 m** "used for the tidal predictions for 2027", while the planes table still lists 1.32 m. That affects the anomaly baseline (`MSL_Bar`). Decided 2026-11-08: keep 1.32 m, the planes table value (the 2027 table still lists 1.32 m; the difference is 1 cm or less).
 
 ## Items 7/8: measured water levels
 

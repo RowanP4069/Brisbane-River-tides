@@ -7,7 +7,7 @@ Placeholders marked `TODO` are things I couldn't confirm from here. Fill them in
 | File | What it is | Origin |
 |---|---|---|
 | `bar_2026_10min.csv` | Brisbane Bar predicted water level, 10-minute interval, 2026 | Downloaded from MSQ / Queensland open data |
-| `stations.csv` | Secondary-port corrections (lag, ratio) and chainage per station | Hand-built from the MSQ 2026 tidal planes PDF; chainage from `build_centreline.py` |
+| `stations.csv` | Secondary-port corrections (lag, ratio) and chainage per station | Hand-built from the MSQ tidal planes PDF (2026 edition; 2027 identical, adopted 2026-11-17); chainage from `build_centreline.py` |
 | `qld_watercourse_brisbane_river.geojson` | Brisbane River segments of the QLD watercourse lines layer, as downloaded | QLD Department of Resources spatial service |
 | `centreline.csv` | Single ordered river centreline, Brisbane Bar gauge upstream, with chainage | Derived by `build_centreline.py` from the file above |
 | `features.csv` | Gravel runs and landmarks between Kholo Creek and the old weir ruin | Field visits and OpenStreetMap |
@@ -117,11 +117,12 @@ What field visits showed, one row per thing seen: whether a gravel run was runni
 
 **Source**
 
-- *Semidiurnal Tidal Planes — 2026*, Maritime Safety Queensland. Heights are above Queensland Port Datum, LAT (1992).
-  https://www.msq.qld.gov.au/_/media/tmronline/msqinternet/msqfiles/home/tides/tidal-planes/2026-semidiurnal-tidal-planes.pdf
-- MSQ tidal planes page: https://www.msq.qld.gov.au/tides/tidal-planes
-- **2027 check (2026-11-08):** the Brisbane River rows of *2027 Semidiurnal and diurnal tidal planes* (Brisbane Bar to Kholo Creek, 13 rows) are identical to 2026. That includes the Indooroopilly / Seventeen Mile Rocks lag reversal, so no change was needed.
-- Retrieved: `TODO`. The PDF was attached to a Claude session on 2026-11-07, so retrieval was on or before that date.
+- **Current edition: *Semidiurnal Tidal Planes - 2027*** (in *2027 Semidiurnal and diurnal tidal planes*), Maritime Safety Queensland. Heights are above Queensland Port Datum, LAT (1992); Tidal Datum Epoch 2010-2029.
+  https://www.msq.qld.gov.au/_/media/tmronline/msqinternet/msqfiles/home/tides/tidal-planes/2027-tidal-planes.pdf
+  Retrieved 2026-11-17 (downloaded in a browser; MSQ's site refuses scripted downloads). 168,527 bytes, SHA-256 `c1f289f42bec59e2fc874116d89194b73bb11cdcf5f43c421b1db1da7e464648`. A copy is kept privately, not in this repository.
+- **Adopted 2026-11-17 (item 13, policy: use each new year's planes once published).** Every Brisbane River row (Brisbane Bar, Boat Passage to Kholo Creek: 14 lines) is identical in the 2026 and 2027 editions, character for character: time differences, MHWS, MHWN, MLWN, MLWS, MSL, ratio, HAT, permanent marks and reference levels. Every value in this file was re-checked against the 2027 table by script, including the four derived ratios recomputed from its spring and neap ranges: 0 mismatches. So no value changed, and the model output is unchanged. (An earlier look on 2026-11-08 compared mainly the lags.)
+- Previous edition: *Semidiurnal Tidal Planes - 2026*, https://www.msq.qld.gov.au/_/media/tmronline/msqinternet/msqfiles/home/tides/tidal-planes/2026-semidiurnal-tidal-planes.pdf. 623,818 bytes, SHA-256 `dcf4b4fb95ea1e4dc6445122cae851c5fbcc589801881033a4a4d7bc2fbd9d16`. Retrieved on or before 2026-10-05 (the date of the owner's saved copy); this file was first built from it on 2026-11-07.
+- MSQ tidal planes page: https://www.msq.qld.gov.au/tides/tidal-planes. It says the standard ports' planes are fixed from the 2022 edition until the epoch is reviewed, but secondary ports (all the river stations) are updated as new observations become available, so check each new edition.
 - Licence: Creative Commons Attribution 4.0 (CC BY 4.0), by default. Checked 2026-11-08: MSQ refers to the Queensland Government *Open Data, Information Sharing, Access and Use Policy*, which makes CC BY 4.0 the default licence for government data:
   https://www.forgov.qld.gov.au/information-technology/queensland-government-enterprise-architecture-qgea/qgea-directions-and-guidance/qgea-policies-standards-and-guidelines/open-data-information-sharing-access-and-use-policy
   MSQ's open data page (https://www.msq.qld.gov.au/tides/open-data) says tide data is published "as part of the Queensland Government's Open Data initiative". Neither the PDF nor the tidal planes page states a licence of its own, so this rests on the policy default.
@@ -146,10 +147,11 @@ This file is hand-built, not a copy of anything published, so record any change 
 - `note` records the provenance of each ratio (published, or derived with the spring and neap values used).
 - 14 rows: the 13 stations plus a `Mt Crosby Weir` placeholder with empty values, which the script skips. Fill it in only from a source.
 - Line endings are CRLF. `build_centreline.py` keeps them when it rewrites the file.
-- SHA-256 (2026-11-07, after the changes below): `f03fceac0c02e605e7ea11cdb396aa23c27e0e7f35ddded0c2262012f0d6e1fd`.
+- SHA-256 (2026-11-17, after the changes below): `7f50b9ce37d78f5891afb742d9c03466f3f1e9c4fbefb5d73d8cc8883374a7af`.
 
 **Changes**
 
+- 2026-11-17: source moved to the 2027 edition (identical values, see Source). Only the Mt Crosby Weir note changed: "NOT in MSQ 2026 or 2027 planes".
 - 2026-11-07 (v0.3.0): added `msl_m` and `range_m` from the MSQ 2026 tidal planes table. No existing values changed. Lags and published ratios were re-checked against the same table and all match.
 - 2026-11-07: `chainage_km` replaced with distance measured along the river centreline. The old values were straight-line distances between consecutive stations and understated river distance by up to about 34 % (Kholo Creek 56.6 → 75.8 km, Moggill Ferry 49.2 → 68.6 km). Boat Passage now snaps to 0.0 km (it was 3.7). This does not affect the model, because its lag is 0 and its ratio is 1, the same as the Bar.
 - 2026-11-07: Brisbane Bar `lat`/`lon` changed from -27.3667, 153.1667 to -27.4016, 153.1574, the current gauge at Whyte Island (see `centreline.csv`, Gauge position). The old value matches the historical "West Inner Bar" position listed by PSMSL and GLOSS.
@@ -158,7 +160,7 @@ This file is hand-built, not a copy of anything published, so record any change 
 
 - Lags are not strictly monotonic. Seventeen Mile Rocks (80 min) is earlier than Indooroopilly (92.5 min). This comes from the published table, not a transcription error.
   - It is almost all low water: HW is +1 20 at both places, while LW goes from +1 45 (Indooroopilly) to +1 20 (Seventeen Mile Rocks).
-  - Checked 2026-11-08: every Brisbane River row is identical in the 2025 and 2026 *Semidiurnal Tidal Planes* (the only change is the Port Office benchmark), so this is a long-standing value, not a new typo.
+  - Checked 2026-11-08: every Brisbane River row is identical in the 2025 and 2026 *Semidiurnal Tidal Planes* (the only change is the Port Office benchmark), so this is a long-standing value, not a new typo. Still the same in the 2027 edition (checked 2026-11-17).
   - Seventeen Mile Rocks and every place above it are marked `**`, which the PDF defines as "Tidal planes determined through non-linear tidal transfer. Contact MSQ Tidal Unit for further information."
   - Query emailed to the MSQ Tidal Unit on 2026-11-08 (how the two places were derived, and how to use `**` time differences). Record the reply here.
 
