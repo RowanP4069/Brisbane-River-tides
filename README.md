@@ -60,6 +60,13 @@ Collected from 2026-11-17. Columns: `time_aest, gauge, value_m, datum`. Every ga
 - The bulletin gives the reading time as e.g. "02.14PM Tue"; the date is the latest such day at or before the bulletin's issue time. Readings that would be more than 6 days old are skipped.
 - Some gauges here are the same instruments as in `bcc/` (e.g. 540683 St Lucia = E1856), through a different route.
 
+### `bom-filled/540063.csv`: Colleges Crossing readings filled by hand
+
+The full BoM series for gauge 540063 (Brisbane River at Colleges Crossing) from 2026-11-01 17:00, taken from BoM's web table for the gauge (IDQ65389, about 14 days of readings) rather than the FTP bulletin, so it has every reading the gauge reported, not only those the 15-minute runs caught. Columns: `time_aest, gauge, value_m, datum, source`, with `source` saying which copy of the web table each row came from. Further gaps in `bom/` are filled the same way, by reading the web table in a browser, never by script.
+
+- Kept exactly as BoM shows them, including repeated times and one-off spikes (e.g. 1.79 m among 0.99 m readings on 2026-11-05 10:57); users filter those. A flat 0.59 m is the gauge's floor: the water is at or below it.
+- The 2026-11-01 to 2026-11-15 16:50 rows match the web table read on 2026-11-17 reading for reading from 2026-11-04 (the table no longer goes back further).
+
 ## Licence and attribution
 
 The BCC, MSQ and storm tide sources are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The files here are unchanged copies, merged by date, except that for the storm tide gauges the residual column (measured minus predicted) and empty slots are left out.
