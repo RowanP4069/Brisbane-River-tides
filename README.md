@@ -50,11 +50,12 @@ The page computes each day's heights itself, with the same formula as `river_tid
 
 ## Gauges page (measured)
 
-A second page, **Gauges**, shows what the river actually did: the last 24, 48 or 72 hours of readings from Brisbane City Council's eight Brisbane River gauges, from Breakfast Creek to Moggill. <https://rowanp4069.github.io/Brisbane-River-tides/gauges.html>
+A second page, **Gauges**, shows what the river actually did: the last 24, 48 or 72 hours of readings from Brisbane City Council's eight Brisbane River gauges, from Breakfast Creek to Moggill, and the Bureau of Meteorology's Colleges Crossing gauge (540063, km 83.8, above Kholo Creek). <https://rowanp4069.github.io/Brisbane-River-tides/gauges.html>
 
 - The page fetches the readings **live** from the council's open data service when it opens (⟳ Refresh fetches again). Nothing is forecast.
 - Heights are **metres AHD**, one datum for every gauge, so unlike the predictions they form a real water surface. The predictions use each place's LAT, about 1.2 m lower at Port Office.
 - Readings arrive at irregular times. Gaps of up to an hour are bridged with a straight line; longer gaps, and gauges whose latest readings haven't arrived yet, show as *no reading*.
+- **Colleges Crossing** comes from the project's own copy of BoM's readings on the gauge-data branch (`bom/`, collected every 15 minutes, and `bom-filled/`, filled by hand from BoM's table), so it can lag a little; the page says when its latest reading is over an hour old. It reports only each 0.05 m change, so its last level is held for up to 3 hours. It reads nothing below 0.59 m AHD, shown as *at gauge floor* (0.59 m or lower). One-off telemetry glitches are left out, by the same rule as `compare_gauges.py`.
 - `build_gauges.py` builds it (`output/gauges.html`). `data/gauges.csv` holds each gauge's position along the river; `build_gauges.py --download` remakes it from the council's gauge list.
 
 The two pages link to each other at the top. Locally, `river_tides.py` writes `output/index.html` (predictions), named as on the website so the links work.

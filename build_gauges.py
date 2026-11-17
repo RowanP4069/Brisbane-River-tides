@@ -3,7 +3,9 @@
 
 The page shows what the river actually did: the latest readings (up to 72 hours) of
 Brisbane City Council's eight Brisbane River gauges, fetched live by the page itself
-from the council's open data API. No forecasting: predictions are the other page.
+from the council's open data API, and BoM's Colleges Crossing gauge (540063), fetched
+from the project's own copy on the gauge-data branch. No forecasting: predictions are
+the other page.
 
 What this script puts in the page: the gauge list with each gauge's position along the
 river (chainage, km from Brisbane Bar), the river centreline for the map, and the MSQ
@@ -101,28 +103,59 @@ def download_gauges():
     print("Wrote", GAUGES_CSV)
 
 
+# Colleges Crossing (BoM 540063, km 83.81), above Kholo Creek. Not in the council's data:
+# its readings are BoM's, saved on the gauge-data branch (bom/ by the 15-minute
+# collection, bom-filled/ read by hand from BoM's web table), which the page fetches from
+# GitHub (raw.githubusercontent.com allows that from any page). They are m AHD (gauge
+# zero 0.00 AHD), so they sit on the same datum as the council's.
+BOM_GAUGE = {
+    "id": "540063", "bom": "540063", "name": "Brisbane River at Colleges Crossing",
+    "short": "Colleges Crossing", "feature_id": "gauge-colleges-crossing",
+    # Reads nothing below this (BoM): 0.59 means "here or lower".
+    "floor_m": 0.59,
+    # It reports each 0.05 m change, plus a reading about every 3 hours when the level
+    # holds, so a quiet spell of up to 3 hours means "no change", not "no reading".
+    "gap_max_min": 180,
+}
+BOM_FILES = "https://raw.githubusercontent.com/RowanP4069/Brisbane-River-tides/gauge-data/"
+KM_SHOWN = 85.0               # the page shows the river to here (past Colleges Crossing)
+
+
+def bom_gauge():
+    """The Colleges Crossing entry for the page, placed from data/features.csv."""
+    f = pd.read_csv(DATA / "features.csv").set_index("feature_id").loc[BOM_GAUGE["feature_id"]]
+    g = {k: v for k, v in BOM_GAUGE.items() if k != "feature_id"}
+    g.update(lon=float(f.lon), lat=float(f.lat), chainage_km=float(f.km), source="bom")
+    return g
+
+
 def build_payload(built=None):
     g = pd.read_csv(GAUGES_CSV, dtype={"bom_no": str})
     if not g.chainage_km.is_monotonic_increasing:
         raise SystemExit(f"{GAUGES_CSV}: gauges must be listed downstream to upstream")
     st = load_stations(DATA / "stations.csv")
     cl = pd.read_csv(DATA / "centreline.csv")
-    km_max = float(st.chainage_km.max())                     # Kholo Creek
-    river = cl[cl.chainage_km <= km_max + 0.5]
+    kholo_km = float(st.chainage_km.max())                   # MSQ's figures end here
+    river = cl[cl.chainage_km <= KM_SHOWN + 0.5]
     meta = {
         "source": ("https://data.brisbane.qld.gov.au/api/explore/v2.1/catalog/datasets/"
                    "telemetry-sensors-rainfall-and-stream-heights-observations/exports/json"),
         "timezone": "AEST (UTC+10)",
         "datum": "metres AHD (as published by Brisbane City Council)",
-        "km_max": km_max,
+        "km_max": KM_SHOWN,
+        "kholo_km": kholo_km,
+        # BoM gauge files on the gauge-data branch: the hand-filled series, and the
+        # 15-minute collection's monthly files (bom/YYYY-MM.csv).
+        "bom": {"base": BOM_FILES, "filled": "bom-filled/{id}.csv", "monthly": "bom/{month}.csv"},
     }
     if built is not None:
         meta["built"] = built.strftime("%Y-%m-%dT%H:%M")
     return {
         "meta": meta,
+        # Downstream to upstream; Colleges Crossing last.
         "gauges": [{"id": r.sensor_id, "bom": r.bom_no, "name": r["name"], "short": r.short,
-                    "lon": r.lon, "lat": r.lat, "chainage_km": r.chainage_km}
-                   for _, r in g.iterrows()],
+                    "lon": r.lon, "lat": r.lat, "chainage_km": r.chainage_km, "source": "bcc"}
+                   for _, r in g.iterrows()] + [bom_gauge()],
         "stations": station_labels(st, DATA / "centreline.csv"),
         "river": {"lon": river.lon.round(5).tolist(), "lat": river.lat.round(5).tolist()},
     }

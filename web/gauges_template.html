@@ -49,7 +49,7 @@
 <body>
 <header>
   <nav class="pages"><a href="index.html">Height predictions</a><a href="gauges.html" aria-current="page">Gauges (measured)</a><a href="compare.html">Measured vs predicted</a><a href="report.html">Report the flow</a><a href="results.html">Report the flow (results)</a><a href="guesswork.html" title="Guesswork: Kholo Creek to the weir ruin (sandbox)">Guesses</a></nav>
-  <h1>Brisbane River gauges: measured water height, Breakfast Creek to Moggill</h1>
+  <h1>Brisbane River gauges: measured water height, Breakfast Creek to Colleges Crossing</h1>
   <span class="sub">Height, not flow direction: the flow keeps running for a while after the level turns.</span>
   <span class="sub" id="subtitle">Loading the latest readings…</span>
   <span class="sub" id="status"></span>
@@ -99,13 +99,21 @@
     few cm); longer gaps, and gauges that haven't caught up yet, show as <i>no reading</i>. Nothing here is a forecast:
     for predicted tides use the <a href="index.html">Height predictions</a> page. <b>Not a flood warning service</b>:
     for warnings see the <a href="https://www.bom.gov.au/qld/flood/">Bureau of Meteorology</a>.</p>
+  <p><b>Colleges Crossing</b> (km 83.8, above Kholo Creek, where MSQ's tide figures end) is the Bureau of
+    Meteorology's flood gauge 540063, from the project's own copy of its readings (collected every 15 minutes, gaps
+    filled by hand from BoM's table), so it can lag a little. It reports each 0.05 m change, so a quiet spell of up
+    to 3 hours means the level held. It reads nothing below 0.59 m AHD: a pale bar or hollow dot there means 0.59 m
+    <i>or lower</i>. One-off telemetry glitches (a single reading 0.40 or 0.80 m out) are left out; freshwater
+    after rain raises the whole level and stays in.</p>
   <p class="warn">Heights are metres <b>AHD</b> (Australian Height Datum, roughly mean sea level), one datum for
     every gauge, so unlike the predictions these do form a real water surface. The predictions page uses each
     place's own LAT instead, about 1.2 m lower at Port Office, so the numbers differ. Jindalee and Moggill have not
     read below about 0 m AHD in the readings checked so far: their lowest tides may not be recorded in full.</p>
   <p>Data: Telemetry sensors — Rainfall and Stream heights © Brisbane City Council, CC BY 4.0. Station names:
     Maritime Safety Queensland tidal planes © State of Queensland, CC BY 4.0. River centreline: Watercourse lines -
-    Queensland © State of Queensland (Department of Resources), CC BY 4.0. Basemap attribution on the map.</p>
+    Queensland © State of Queensland (Department of Resources), CC BY 4.0. Colleges Crossing river heights ©
+    Commonwealth of Australia (Bureau of Meteorology), Creative Commons Attribution Australia licence. Basemap
+    attribution on the map.</p>
   <p id="built" hidden></p>
 </footer>
 
@@ -127,6 +135,11 @@ const AEST_MS = 10 * 3600000;
 // readings are 5-30 min and 30-60 min gaps are common. A straight line across an hour
 // of tide is off by at most about 3 cm (amplitude 1 m, M2 period), fine for display.
 const GAP_MAX_MS = 60 * MIN_MS;
+// Colleges Crossing reports only on a 0.05 m change (plus about every 3 h), so it gets its
+// own, longer allowance (gap_max_min from build_gauges.py).
+const gapMax = g => GAUGES[g].gap_max_min ? GAUGES[g].gap_max_min * MIN_MS : GAP_MAX_MS;
+// At or below a gauge's floor (Colleges Crossing: 0.59 m) the water may be lower still.
+const atFloor = (g, v) => GAUGES[g].floor_m != null && v <= GAUGES[g].floor_m + 1e-9;
 const RATE_HALF_MS = 15 * MIN_MS;   // rising/falling from the change over +-15 min
 
 function fmtTime(ms) {               // "Sun, 8 Nov 15:45" in AEST
@@ -146,7 +159,7 @@ let series = GAUGES.map(() => []);
 let fetchedAt = 0;
 
 async function fetchReadings() {
-  const ids = GAUGES.map(g => `"${g.id}"`).join(", ");
+  const ids = GAUGES.filter(g => g.source === "bcc").map(g => `"${g.id}"`).join(", ");
   const url = DATA.meta.source + "?" + new URLSearchParams({
     where: `gauge in (${ids}) and value is not null`,
     select: "measured, gauge, value",
@@ -164,18 +177,73 @@ async function fetchReadings() {
   return out;
 }
 
+// ---- BoM gauges (Colleges Crossing) ---------------------------------------------------
+// From the project's copy on the gauge-data branch: the hand-filled series plus the
+// 15-minute collection's files for this month and last (a 72 h window can cross a month
+// end). Times there are naive AEST, "YYYY-MM-DD HH:MM". A missing file is skipped.
+const aestMs = t => Date.parse(t.replace(" ", "T") + ":00+10:00");
+async function fetchBom(G) {
+  const B = DATA.meta.bom, now = new Date(Date.now() + AEST_MS);
+  const months = [0, 1].map(k => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - k, 1))
+    .toISOString().slice(0, 7));
+  const paths = [B.filled.replace("{id}", G.id), ...months.map(m => B.monthly.replace("{month}", m))];
+  const texts = await Promise.all(paths.map(async p => {
+    const r = await fetch(B.base + p, { cache: "no-cache" });
+    return r.ok ? r.text() : "";
+  }));
+  const rows = [];
+  for (const text of texts) {
+    for (const line of text.split("\n").slice(1)) {
+      const [t, gauge, v] = line.split(",");
+      if (gauge === G.id && t && Number.isFinite(+v) && v !== "") rows.push([aestMs(t), +v]);
+    }
+  }
+  return cleanBom(rows);
+}
+// BoM's series has one-off telemetry glitches: a single reading often 0.40 or 0.80 m out,
+// back to normal minutes later, usually in the same minute as a real reading. The same
+// rule as compare_gauges.py (guess_readings): where a minute has more than one value, keep
+// the one nearest the readings in the minutes either side; then drop a lone reading
+// 0.25 m or more from the median of it and its 4 neighbours. Freshwater rises are
+// gradual, so they stay in.
+function cleanBom(rows) {
+  const seen = new Set(), byT = new Map();
+  for (const [t, v] of rows) {                       // the same reading twice: once
+    const k = t + "|" + v; if (seen.has(k)) continue; seen.add(k);
+    if (!byT.has(t)) byT.set(t, []); byT.get(t).push(v);
+  }
+  const ts = [...byT.keys()].sort((a, b) => a - b), out = [];
+  ts.forEach((t, i) => {
+    const vals = byT.get(t);
+    if (vals.length === 1) { out.push([t, vals[0]]); return; }
+    const around = [i - 1, i + 1].filter(j => j >= 0 && j < ts.length).map(j => byT.get(ts[j])[0]);
+    const mid = around.length ? around.reduce((a, b) => a + b, 0) / around.length : vals[0];
+    out.push([t, vals.reduce((a, b) => Math.abs(b - mid) < Math.abs(a - mid) ? b : a)]);
+  });
+  const SPIKE_M = 0.25;
+  return out.filter((r, i) => {
+    const w = out.slice(Math.max(0, i - 2), i + 3).map(x => x[1]).sort((a, b) => a - b);
+    const med = w.length % 2 ? w[(w.length - 1) / 2] : (w[w.length / 2 - 1] + w[w.length / 2]) / 2;
+    return Math.abs(r[1] - med) < SPIKE_M;
+  });
+}
+
 // Value of gauge g at time t: a reading at t, or a straight line between the readings
 // either side if they are at most GAP_MAX_MS apart; otherwise NaN (no reading).
-// Never extends past a gauge's first or last reading.
+// Never extends past a gauge's first or last reading, except a change-only gauge's last
+// level, held for up to its gap allowance.
 function valueAt(g, t) {
   const s = series[g];
   let lo = 0, hi = s.length - 1;
+  // A gauge that reports only on a change (gap_max_min set: Colleges Crossing) has held
+  // its last level until it says otherwise, for up to its gap allowance.
+  if (hi >= 0 && t > s[hi][0] && GAUGES[g].gap_max_min && t - s[hi][0] <= gapMax(g)) return s[hi][1];
   if (hi < 0 || t < s[0][0] || t > s[hi][0]) return NaN;
   while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (s[mid][0] <= t) lo = mid; else hi = mid; }
   if (s[lo][0] === t) return s[lo][1];
   if (s[hi][0] === t) return s[hi][1];
   const [t0, v0] = s[lo], [t1, v1] = s[hi];
-  if (t1 - t0 > GAP_MAX_MS) return NaN;
+  if (t1 - t0 > gapMax(g)) return NaN;
   return v0 + (v1 - v0) * (t - t0) / (t1 - t0);
 }
 
@@ -239,15 +307,18 @@ function diverge(v, max) {
   const end = t >= 0 ? RED : BLUE, k = Math.abs(t);
   return MID.map((m, i) => Math.round(m + (end[i] - m) * k));
 }
+const C_FLOOR = [236, 230, 214];   // at a gauge's floor: the level may be lower
 const COLOURS = {
-  dir: (f, g) => !Number.isFinite(rate[f][g]) ? C_NONE
+  dir: (f, g) => Number.isFinite(H[f][g]) && atFloor(g, H[f][g]) ? C_FLOOR : !Number.isFinite(rate[f][g]) ? C_NONE
     : rate[f][g] > SLACK_M_PER_H ? C_RISE : rate[f][g] < -SLACK_M_PER_H ? C_FALL : C_SLACK,
-  rate: (f, g) => !Number.isFinite(rate[f][g]) ? C_NONE : diverge(rate[f][g], RATE_MAX),
+  rate: (f, g) => Number.isFinite(H[f][g]) && atFloor(g, H[f][g]) ? C_FLOOR
+    : !Number.isFinite(rate[f][g]) ? C_NONE : diverge(rate[f][g], RATE_MAX),
 };
 const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 function renderLegend() {
   const el = $("legend");
-  const none = `<span><span class="sw" style="background:${css(C_NONE)}"></span>no reading</span>`;
+  const none = `<span><span class="sw" style="background:${css(C_NONE)}"></span>no reading</span>`
+    + `<span><span class="sw" style="background:${css(C_FLOOR)};outline:1px solid #9aa4ad"></span>at gauge floor</span>`;
   if (state.colour === "dir") {
     el.innerHTML = `<span><span class="sw" style="background:${css(C_RISE)}"></span>rising</span>
       <span><span class="sw" style="background:${css(C_FALL)}"></span>falling</span>
@@ -279,10 +350,10 @@ function showNoMap(err) {
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 let map = null;
 try {
-  // Opening view picked by eye to frame Breakfast Creek -> Moggill.
+  // Opening view picked by eye to frame Breakfast Creek -> Colleges Crossing.
   map = new maplibregl.Map({
     container: "map", style: MAP_STYLE,
-    center: [152.955, -27.51], zoom: 11, pitch: 55, bearing: -15, maxPitch: 75,
+    center: [152.93, -27.53], zoom: 10.6, pitch: 55, bearing: -15, maxPitch: 75,
   });
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
 } catch (err) {
@@ -378,13 +449,17 @@ if (map) {
 
 function tipText(f, g) {
   const v = H[f][g], r = rate[f][g], G = GAUGES[g];
-  const head = `${G.name}  (km ${G.chainage_km.toFixed(1)}, BoM ${G.bom})`;
+  const head = `${G.name}  (km ${G.chainage_km.toFixed(1)}, BoM ${G.bom}${G.source === "bom" ? ", above Kholo Creek" : ""})`;
   if (!Number.isFinite(v)) {
     const s = series[g], last = s.length ? s[s.length - 1][0] : -Infinity;
     return `${head}\n` + (TIMES[f] > last
       ? `no reading yet (last at ${s.length ? fmtTime(last) : "none in 72 h"})`
-      : "no reading (gap of over an hour)");
+      : `no reading (gap of over ${G.gap_max_min ? G.gap_max_min / 60 + " hours" : "an hour"})`);
   }
+  const s = series[g], last = s[s.length - 1][0];
+  const held = G.gap_max_min && TIMES[f] > last ? ` (no change reported since ${fmtTime(last)})` : "";
+  if (atFloor(g, v)) return `${head}\n${v.toFixed(2)} m AHD or lower: the gauge reads nothing below ${G.floor_m.toFixed(2)} m${held}`;
+  if (held) return `${head}\n${v.toFixed(2)} m AHD${held}`;
   return `${head}\n${v.toFixed(2)} m AHD   ${(v - BASES.mean.mean[g]).toFixed(2)} m vs window mean\n`
     + (Number.isFinite(r) ? `rate ${r >= 0 ? "+" : ""}${r.toFixed(2)} m/h` : "rate: not enough readings");
 }
@@ -429,6 +504,12 @@ function drawProfile() {
   ctx.save(); ctx.translate(14, (PAD.t + Ht - PAD.b) / 2); ctx.rotate(-Math.PI / 2);
   ctx.textAlign = "center"; ctx.fillText(base.label, 0, 0); ctx.restore();
 
+  // Kholo Creek: MSQ's tide figures (and the predictions) end here.
+  const xk = X(DATA.meta.kholo_km);
+  ctx.strokeStyle = "#9aa4ad"; ctx.setLineDash([5, 3]);
+  ctx.beginPath(); ctx.moveTo(xk, PAD.t); ctx.lineTo(xk, Ht - PAD.b); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = "#5d6873"; ctx.textAlign = "left"; ctx.fillText("MSQ figures end", xk + 4, Ht - PAD.b - 6);
+
   // Each gauge's range over the window
   ctx.fillStyle = "rgba(31,111,178,.13)";
   for (let g = 0; g < NG; g++) {
@@ -449,7 +530,10 @@ function drawProfile() {
   for (let g = 0; g < NG; g++) {
     const v = base.f(f, g), x = X(GAUGES[g].chainage_km);
     ctx.beginPath();
-    if (Number.isFinite(v)) {
+    if (Number.isFinite(v) && atFloor(g, H[f][g])) {          // at the floor: hollow, dark
+      ctx.arc(x, Y(v), 5, 0, 2 * Math.PI); ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.strokeStyle = "#1d2329"; ctx.lineWidth = 1.5; ctx.stroke();
+    } else if (Number.isFinite(v)) {
       ctx.arc(x, Y(v), 5, 0, 2 * Math.PI); ctx.fillStyle = css(colourFn(f, g)); ctx.fill();
       ctx.strokeStyle = "#1d2329"; ctx.lineWidth = 1; ctx.stroke();
     } else {
@@ -522,9 +606,21 @@ async function load() {
   $("status").textContent = "Fetching…"; $("status").className = "sub";
   $("refresh").disabled = true;
   try {
-    series = await fetchReadings();
+    const bomG = GAUGES.map((G, i) => [G, i]).filter(([G]) => G.source === "bom");
+    const [bcc, ...bom] = await Promise.all([fetchReadings(),
+      ...bomG.map(([G]) => fetchBom(G).catch(err => { console.error(err); return null; }))]);
+    bomG.forEach(([, i], k) => { bcc[i] = bom[k] || []; });
+    series = bcc;
     fetchedAt = Date.now();
-    $("status").textContent = "";
+    // BoM's readings come via the project's collection, so say how fresh they are.
+    const notes = bomG.map(([G, i], k) => {
+      if (bom[k] === null) return `${G.short}: couldn't fetch its readings`;
+      const s = series[i];
+      if (!s.length) return `${G.short}: no readings`;
+      const ago = Math.round((Date.now() - s[s.length - 1][0]) / MIN_MS);
+      return ago > 60 ? `${G.short}: latest reading ${fmtTime(s[s.length - 1][0])} (${Math.round(ago / 60)} h ago)` : "";
+    }).filter(Boolean);
+    $("status").textContent = notes.join("; ");
     applyWindow(atEnd);
   } catch (err) {
     console.error(err);
