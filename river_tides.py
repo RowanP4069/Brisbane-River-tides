@@ -394,6 +394,44 @@ def sandbox_block(guesses, features, obs, from_km, to_km):
             "observations": sorted(observations, key=lambda o: (o["from"], o["km"]))}
 
 
+HEAD_CHART_KM = 75.0          # the tidal-head chart shows reports from here upstream
+
+
+def head_chart(bar, bar_msl, st, features, obs, to_km):
+    """Data for the Guesswork page's tidal-head chart: what was seen above about km 75,
+    against the predicted Kholo Creek level at the time (MSQ's figures; no guesses).
+
+    reports: accepted flow reports (the reports branch, as on the results page).
+    observations: our field observations, with the Kholo level range over each one as
+      recorded in observations.csv (kholo_min_m, kholo_max_m).
+    lines: features drawn across the chart (gravel runs, the ruin), and Kholo Creek.
+    """
+    from build_results import all_reports              # the results page's loader
+    kholo = st.iloc[[-1]][["lag_min", "ratio", "msl_m"]].reset_index(drop=True)
+    reports = [r for r in all_reports() if float(r["km"]) >= HEAD_CHART_KM]
+    times = pd.DatetimeIndex([pd.Timestamp(r["time_aest"]) for r in reports])
+    lev = heights(bar, times, kholo, bar_msl)[:, 0] if len(times) else []
+    soon = heights(bar, times + pd.Timedelta(minutes=10), kholo, bar_msl)[:, 0] if len(times) else []
+    out_reports = [{"time": r["time_aest"], "km": float(r["km"]), "dir": r["dir"],
+                    "kholo_m": round(float(h), 3), "kholo_rising": bool(h2 > h)}
+                   for r, h, h2 in zip(reports, lev, soon)]
+    out_obs = []
+    for o in obs.itertuples():
+        if float(o.km_to) < HEAD_CHART_KM or not o.kholo_min_m:
+            continue
+        out_obs.append({"id": o.obs_id, "from": o.time_from_aest, "to": o.time_to_aest,
+                        "km": round((float(o.km_from) + float(o.km_to)) / 2, 2),
+                        "quantity": o.quantity, "value": o.value,
+                        "kholo_min_m": float(o.kholo_min_m), "kholo_max_m": float(o.kholo_max_m)})
+    lines = [{"name": f.name, "km": float(f.km), "kind": f.kind}
+             for f in features.itertuples()
+             if f.kind == "gravel run" or f.feature_id == SANDBOX_END_FEATURE]
+    lines.append({"name": "Kholo Creek (MSQ figures end)", "km": float(st.chainage_km.max()),
+                  "kind": "limit"})
+    return {"from_km": HEAD_CHART_KM, "to_km": to_km, "reports": out_reports,
+            "observations": out_obs, "lines": sorted(lines, key=lambda l: l["km"])}
+
+
 def write_html(payload, template_path, out_path):
     """Inline the payload into the page template and write a single self-contained file.
 
@@ -518,6 +556,7 @@ def main():
     if args.sandbox:
         obs = pd.read_csv(DATA / "observations.csv", dtype=str).fillna("")
         payload["sandbox"] = sandbox_block(guesses, features, obs, kholo_km, end_km)
+        payload["sandbox"]["head"] = head_chart(full, bar_msl, st, features, obs, end_km)
     write_html(payload, args.template, args.out)
     print("Wrote", args.out)
     if args.json:

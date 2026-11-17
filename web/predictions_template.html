@@ -68,6 +68,13 @@
   #guessList table { border-collapse:collapse; margin:4px 0; }
   #guessList td, #guessList th { text-align:left; vertical-align:top; padding:2px 8px 2px 0; }
   #guessList td:nth-child(-n+2) { white-space:nowrap; }
+  #headWrap { padding:10px 16px 4px; background:var(--panel); border-top:1px solid var(--line); }
+  #headWrap h2 { font-size:14px; margin:0 0 2px; }
+  #headWrap .note { font-size:12px; color:var(--muted); margin:0 0 6px; max-width:900px; }
+  #headChart svg { width:100%; max-width:940px; height:auto; display:block; }
+  #headChart .lab { fill:#5d6873; font-size:11px; }
+  /* The chart scales down on a phone; keep its labels readable. */
+  @media (max-width: 600px) { #headChart .lab { font-size:20px; } }
   .deck-tooltip { font-size:12px !important; }
 </style>
 </head>
@@ -150,6 +157,16 @@
 </div>
 <div id="profileWrap"><canvas id="profile"></canvas><div id="ptip"></div></div>
 <div id="obsList" hidden></div>
+<!-- Sandbox page only: the tidal-head chart, drawn by renderHeadChart(). -->
+<section id="headWrap" hidden>
+  <h2>Where the tide reaches: everything seen above km 75, against the Kholo Creek level</h2>
+  <p class="note">Across: the <b>predicted Kholo Creek level</b> at the time (MSQ's figures, metres above Kholo LAT).
+    Up: km up the river. If the tide reaches a gravel run only above some Kholo level, the run's markers should
+    change from running (open) to drowned (filled) at that level, and flow reports above the run should only show
+    the tide (upstream flow) at higher levels. The brown ticks are the guessed crests (G-floor), drawn for
+    comparison: the chart itself contains no guesses. Hover over or tap a marker for details.</p>
+  <div id="headChart"></div>
+</section>
 
 <footer>
   <p><b>Predicted astronomical tide only.</b> Excludes river flow, wind, storm surge and dam releases. Colours are
@@ -837,6 +854,83 @@ function renderObsList() {
       + `${esc(o.quantity.replace(/_/g, " "))} ${esc(o.value)} (${esc(o.confidence)})`
       + (o.height_m_ahd != null ? `, mark at ${o.height_m_ahd.toFixed(2)} m AHD` : "") + obsGuard(o) + "</p>").join("");
 }
+// ---- Tidal-head chart (sandbox) ---------------------------------------------------------
+// What was seen above km 75 (reports and our observations) against the predicted Kholo
+// Creek level at the time, from DATA.sandbox.head (river_tides.py head_chart). Drawn once,
+// as SVG; it doesn't follow the day or time shown above.
+function renderHeadChart() {
+  const HD = SB.head, W = 940, Hh = 430, L = 46, R = 290, T = 14, B = 40;
+  const xs = [...HD.reports.map(r => r.kholo_m), ...HD.observations.flatMap(o => [o.kholo_min_m, o.kholo_max_m]),
+              ...SB.floors.map(fl => fl.crest_m)];
+  const x0 = Math.floor(Math.min(0, ...xs) * 2) / 2, x1 = Math.ceil(Math.max(2, ...xs) * 2) / 2;
+  const X = v => L + (v - x0) / (x1 - x0) * (W - L - R);
+  const Y = km => T + (HD.to_km + 0.3 - km) / (HD.to_km + 0.3 - HD.from_km) * (Hh - T - B);
+  const ink = "#1d2329", e = s => esc(s);
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Observations above km 75 against the predicted Kholo Creek level">`;
+  // Grid: Kholo level every 0.5 m, km every 2.
+  for (let v = x0; v <= x1 + 1e-9; v += 0.5) {
+    s += `<line x1="${X(v)}" x2="${X(v)}" y1="${T}" y2="${Hh - B}" stroke="#e3e7ea"/>`
+      + `<text class="lab" x="${X(v)}" y="${Hh - B + 16}" text-anchor="middle">${v.toFixed(1)}</text>`;
+  }
+  for (let km = Math.ceil(HD.from_km / 2) * 2; km <= HD.to_km; km += 2) {
+    s += `<text class="lab" x="${L - 6}" y="${Y(km) + 4}" text-anchor="end">${km}</text>`;
+  }
+  s += `<text class="lab" x="${(L + W - R) / 2}" y="${Hh - 6}" text-anchor="middle">predicted Kholo Creek level at the time, m above Kholo LAT</text>`
+    + `<text class="lab" x="12" y="${(T + Hh - B) / 2}" text-anchor="middle" transform="rotate(-90 12 ${(T + Hh - B) / 2})">km</text>`;
+  // Feature lines across, labelled on the right. Labels closer than 12 px are nudged apart.
+  let lastY = -Infinity;
+  for (const ln of [...HD.lines].sort((a, b) => b.km - a.km)) {
+    const y = Y(ln.km), ly = Math.max(y + 4, lastY + 12); lastY = ly;
+    const dash = ln.kind === "gravel run" ? "" : ' stroke-dasharray="5 3"';
+    s += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="${ln.kind === "gravel run" ? "#b08a4a" : "#9aa4ad"}" stroke-width="1.2"${dash}/>`
+      + `<text class="lab" x="${W - R + 6}" y="${ly}">${e(ln.name)}, km ${fmtKm(ln.km)}</text>`;
+  }
+  // Guessed crests: a brown tick on each run's line.
+  for (const fl of SB.floors) {
+    const x = X(fl.crest_m), y = Y(fl.km);
+    s += `<line x1="${x}" x2="${x}" y1="${y - 9}" y2="${y + 9}" stroke="#7a5a1e" stroke-width="2" stroke-dasharray="3 2">`
+      + `<title>${e(fl.id)}: guessed crest ${fl.crest_m.toFixed(2)} m above Kholo LAT (${e(fl.name)})</title></line>`
+      + `<text class="lab" x="${x + 4}" y="${y - 11}" fill="#7a5a1e">${e(fl.id)}</text>`;
+  }
+  // Our observations: a bar over the Kholo level range during the observation, and a
+  // dark marker at its middle (open = running or calm, filled = drowned or covered).
+  for (const o of HD.observations) {
+    const y = Y(o.km), xa = X(o.kholo_min_m), xb = X(o.kholo_max_m), xm = (xa + xb) / 2;
+    const tip = `<title>${e(o.from)}${o.to !== o.from ? "–" + e(o.to.slice(11)) : ""}, km ${fmtKm(o.km)}: `
+      + `${e(o.quantity.replace(/_/g, " "))} ${e(o.value)} (Kholo ${o.kholo_min_m.toFixed(2)}–${o.kholo_max_m.toFixed(2)} m)</title>`;
+    const filled = ["drowned", "covered"].includes(o.value), half = o.value === "marginal";
+    s += `<line x1="${xa}" x2="${xb}" y1="${y}" y2="${y}" stroke="${ink}" stroke-width="3" opacity=".35"/>`;
+    if (o.quantity === "water_surface") {
+      s += `<rect x="${xm - 4}" y="${y - 4}" width="8" height="8" fill="#9aa4ad" stroke="${ink}">${tip}</rect>`;
+    } else if (o.quantity === "high_water_time") {
+      s += `<text x="${xm}" y="${y - 7}" text-anchor="middle" font-size="11" font-weight="700" fill="${ink}">HW${tip}</text>`;
+    } else if (o.quantity === "mark_state") {
+      s += `<path d="M${xm},${y - 6}L${xm + 6},${y}L${xm},${y + 6}L${xm - 6},${y}Z" fill="${filled ? ink : "#fff"}" stroke="${ink}" stroke-width="1.5">${tip}</path>`;
+    } else {
+      s += `<circle cx="${xm}" cy="${y}" r="5" fill="${filled ? ink : half ? "#9aa4ad" : "#fff"}" stroke="${ink}" stroke-width="1.5">${tip}</circle>`;
+    }
+  }
+  // Flow reports: up (flood) and down (ebb) triangles, slack a bar; colours as the bars'.
+  for (const r of HD.reports) {
+    const x = X(r.kholo_m), y = Y(r.km);
+    const c = r.dir === "up" ? css(C_RISE) : r.dir === "down" ? css(C_FALL) : css(C_SLACK);
+    const tip = `<title>Report ${e(r.time)}, km ${fmtKm(r.km)}: flow ${e(r.dir)}; Kholo ${r.kholo_m.toFixed(2)} m, `
+      + `${r.kholo_rising ? "rising" : "falling"}</title>`;
+    const shape = r.dir === "up" ? `M${x},${y - 7}L${x + 6},${y + 4}L${x - 6},${y + 4}Z`
+      : r.dir === "down" ? `M${x},${y + 7}L${x + 6},${y - 4}L${x - 6},${y - 4}Z`
+      : `M${x - 6},${y - 2}h12v4h-12Z`;
+    s += `<path d="${shape}" fill="${c}" stroke="#fff" stroke-width=".8" opacity=".9">${tip}</path>`;
+  }
+  // Key, on the right between the Colleges Crossing and Kholo Creek labels.
+  const ky = Y(81.5), kx = W - R + 8;
+  s += `<path d="M${kx + 5},${ky - 7}L${kx + 11},${ky + 4}L${kx - 1},${ky + 4}Z" fill="${css(C_RISE)}"/><text class="lab" x="${kx + 18}" y="${ky + 3}">report: flowing up</text>`
+    + `<path d="M${kx + 5},${ky + 23}L${kx + 11},${ky + 12}L${kx - 1},${ky + 12}Z" fill="${css(C_FALL)}"/><text class="lab" x="${kx + 18}" y="${ky + 21}">report: flowing down</text>`
+    + `<circle cx="${kx + 5}" cy="${ky + 35}" r="5" fill="#fff" stroke="${ink}" stroke-width="1.5"/><text class="lab" x="${kx + 18}" y="${ky + 39}">run running (ours)</text>`
+    + `<circle cx="${kx + 5}" cy="${ky + 53}" r="5" fill="${ink}"/><text class="lab" x="${kx + 18}" y="${ky + 57}">run drowned (ours)</text>`;
+  $("headChart").innerHTML = s + "</svg>";
+  $("headWrap").hidden = false;
+}
+
 // The guesses, at the bottom of the page.
 function renderGuessList() {
   const rows = SB.guesses.map(g => `<tr><td><b>${esc(g.id)}</b></td><td>${esc(g.dated)}</td>`
@@ -1066,7 +1160,7 @@ document.addEventListener("keydown", e => {
 });
 window.addEventListener("resize", () => { sizeCanvas(); drawProfile(); });
 
-if (SB) renderGuessList();
+if (SB) { renderGuessList(); if (SB.head) renderHeadChart(); }
 sizeCanvas(); applyWindow(state.day, state.hours);
 markAtKm(hashKm);                           // a marked place from the address, if any
 </script>
