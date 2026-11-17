@@ -12,7 +12,7 @@ An interactive page that shows the **predicted tide** along the Brisbane River, 
 ## What it shows
 
 - **3D map:** a bar every 500 m along the river. Bar height is the predicted water level, and the colour shows whether it's rising or falling (or the rate of change, or a surface-slope proxy).
-- **Profile:** the same data along the river as a chart, with the day's high-to-low range at each point.
+- **Profile:** the same data along the river as a chart. A shaded band shows the range at each point over the whole 24 h or 48 h window: its top line (solid) is the highest level there, its bottom line (dashed) the lowest. Each point reaches its highest at a different time (the tide arrives later upstream), so the top line is not the river at any one moment.
 - **Day:** ◀ ▶ for the previous or next day, a date box with a calendar, **Today**, and a 24 h or 48 h window. Changing day keeps the same time of day, and the day goes in the address so a link opens on it.
 - **Time controls:** 10-minute steps through the window, with play/pause, speed, and arrow keys to step through it. **Now** jumps to the current time in Brisbane and pauses there; **−1 h** and **+1 h** step an hour at a time, carrying on into the next or previous day.
 

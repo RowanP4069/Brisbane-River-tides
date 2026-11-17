@@ -38,6 +38,9 @@
   #legend { display:flex; gap:10px; align-items:center; font-size:12px; color:var(--muted); }
   #legend .sw { display:inline-block; width:12px; height:12px; border-radius:2px; vertical-align:-2px; margin-right:4px; }
   #legend .ramp { width:120px; height:10px; border-radius:2px; }
+  #profileKey { display:flex; flex-wrap:wrap; gap:2px 14px; align-items:center; padding:6px 16px 0;
+    font-size:11px; color:var(--muted); background:var(--panel); }
+  #profileKey svg { vertical-align:-1px; margin-right:3px; }
   #profileWrap { position:relative; flex: 0 0 30vh; min-height:200px; background:var(--panel); }
   #profile { width:100%; height:100%; display:block; }
   #ptip { position:absolute; pointer-events:none; background:rgba(29,35,41,.92); color:#fff; padding:4px 8px;
@@ -99,6 +102,14 @@
   <div id="legend"></div>
 </div>
 
+<!-- Key to the profile below; the window length is filled in by renderSubtitle(). -->
+<div id="profileKey">
+  <span><svg width="22" height="10" aria-hidden="true"><rect y="1" width="22" height="8" fill="rgba(31,111,178,.2)"/></svg>
+    range over this <span id="keyWindow">48 h</span> window at each point:</span>
+  <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#174f80" stroke-width="2"/></svg> highest</span>
+  <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#174f80" stroke-width="2" stroke-dasharray="5 3"/></svg> lowest</span>
+  <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#1d2329" stroke-width="1.5"/></svg> level at the time shown</span>
+</div>
 <div id="profileWrap"><canvas id="profile"></canvas><div id="ptip"></div></div>
 
 <footer>
@@ -331,6 +342,7 @@ function fmtTime(iso) {
 function renderSubtitle() {
   $("subtitle").textContent = `Predicted, ${fmtTime(TIMES[0])} to ${fmtTime(TIMES[NF - 1])} AEST, `
     + `${NF} frames every ${STEP_MIN} min, bars every ${SPACING_M} m`;
+  $("keyWindow").textContent = WINDOW_LABEL;
 }
 // Build stamp: only in pages made with --stamp (the hosted page), so a reader can
 // tell if it has stopped updating.
@@ -537,7 +549,7 @@ function drawProfile() {
 
   // Envelope over the window: a band from each point's lowest to highest value
   // (precomputed per baseline). Along the top left to right, back along the bottom.
-  ctx.fillStyle = "rgba(31,111,178,.08)"; ctx.beginPath();
+  ctx.fillStyle = "rgba(31,111,178,.2)"; ctx.beginPath();
   for (let p = 0; p < NP; p++) {
     const x = X(P.chainage_km[p]), y = Y(base.envHi[p]);
     p ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
@@ -554,6 +566,19 @@ function drawProfile() {
     ctx.fillStyle = css(colourFn(f, p));
     ctx.fillRect(x - bw / 2, Math.min(Y(v), Y(0)), bw, Math.abs(Y(v) - Y(0)) || 1);
   }
+  // Edges of the envelope, drawn over the bars so the lowest line isn't hidden: highest
+  // solid, lowest dashed, each on a white halo so it shows on red and blue bars alike.
+  const edge = (vals, dash) => {
+    ctx.beginPath();
+    for (let p = 0; p < NP; p++) { const x = X(P.chainage_km[p]), y = Y(vals[p]); p ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.setLineDash(dash);
+    ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.lineWidth = 4; ctx.stroke();
+    ctx.strokeStyle = "#174f80"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  edge(base.envHi, []);
+  edge(base.envLo, [5, 3]);
+
   // Water-level line on top
   ctx.strokeStyle = "#1d2329"; ctx.lineWidth = 1.5; ctx.beginPath();
   for (let p = 0; p < NP; p++) { const x = X(P.chainage_km[p]), y = Y(base.f(f, p)); p ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
