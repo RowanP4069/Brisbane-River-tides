@@ -102,6 +102,11 @@ Checked 2026-11-09, after seeing the Pinkenba Wharf chart embedded on a third-pa
 
 BoM shows the council gauges on its flood pages, and runs Water Data Online. Its reuse terms are tighter than CC BY, and the council API is the original source of the same readings, so BoM isn't needed for now.
 
+**Update 2026-11-17:** BoM is now collected, for the gauges the council API doesn't have (540063 Colleges Crossing, 540256 Kholo Bridge, Mt Crosby, Savages Crossing, Wivenhoe Dam tailwater and others above the tidal reach).
+- **Route:** BoM's public anonymous FTP, `ftp://ftp.bom.gov.au/anon/gen/fwo/IDQ60286.html` (Brisbane basin river height bulletin). BoM's README for the FTP describes it as the place for current products, so it suits a script. The bom.gov.au web pages and Water Data Online refuse scripts (HTTP 403) and are not fetched by script.
+- **Limit:** the bulletin has only each gauge's latest reading, so `collect-bom.yml` runs every 15 min, and the series has gaps where runs are late. A gauge's web table (e.g. <https://www.bom.gov.au/fwo/IDQ65389/IDQ65389.540063.tbl.shtml>) keeps about two weeks and can fill gaps by hand.
+- **Terms:** the bulletin and tables say their material is CC BY (Australia) "unless otherwise noted", and that most river height data comes from other agencies whose terms apply. No other terms are noted for these gauges, so they are used under CC BY with attribution, and will be removed if a supplier objects (decided 2026-11-17).
+
 ## First check: Port Office, measured vs predicted
 
 Last 72 hours (5–8 Nov 2026): council gauge E1855 (AHD) compared with MSQ's official Port Office prediction (LAT), 396 readings:

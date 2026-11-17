@@ -13,20 +13,32 @@ files on the gauge-data branch:
                        the Bar and 11 sites around Moreton Bay, Pumicestone Passage and
                        the Broadwater (for roadmap item 15). Metres above LAT, 10-min.
                        The source keeps 7 days. Also stores the official prediction.
+  bom/YYYY-MM.csv      Bureau of Meteorology river heights for the Brisbane River gauges
+                       (station names starting "Brisbane River at", e.g. 540063 Colleges
+                       Crossing, 540256 Kholo Bridge), from the Brisbane basin river height
+                       bulletin IDQ60286 on BoM's public anonymous FTP. The bulletin holds
+                       only each gauge's LATEST reading, so this source is also run every
+                       15 min (.github/workflows/collect-bom.yml). Metres, on the datum the
+                       bulletin gives (AHD, or LGH = local gauge height; 540063's gauge zero
+                       is 0 m AHD). bom/stations.csv lists the gauges' names and datums.
 
-Files have columns time_aest, gauge, value_m (cds/ adds prediction_m) and are sorted
+Files have columns time_aest, gauge, value_m (cds/ adds prediction_m, bom/ adds datum)
+and are sorted
 by time, then gauge.
 Readings are stored as received: no datum change, no cleaning. If a reading for the
 same time and gauge arrives again with a different value, the newer value wins.
 
 Usage:
   python collect_gauges.py --out DIR      # DIR is a checkout of the gauge-data branch
+  python collect_gauges.py --out DIR --sources bom   # only some sources
 
 Uses only the standard library. Sources and licences: docs/data-sources.md.
 """
 import argparse
 import csv
+import html
 import json
+import re
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -72,8 +84,15 @@ CDS_SITES = {
     "goldcoast": "Gold Coast Seaway (Southport)",
 }
 
+# BoM's anonymous FTP is the route BoM provides for automated access to current
+# products (its README: ftp://ftp.bom.gov.au/anon/gen/README). The web pages
+# (bom.gov.au) refuse scripts, so they are never fetched here.
+BOM_URL = "ftp://ftp.bom.gov.au/anon/gen/fwo/IDQ60286.html"
+BOM_PREFIX = "Brisbane River at "
+
 FIELDS = ["time_aest", "gauge", "value_m"]
 CDS_FIELDS = FIELDS + ["prediction_m"]
+BOM_FIELDS = FIELDS + ["datum"]
 
 
 def fetch(url):
@@ -135,6 +154,74 @@ def fetch_cds():
     return out
 
 
+def bom_reading_time(text, issued):
+    """'02.14PM Tue' -> naive AEST datetime: the latest such time at or before the
+    bulletin's issue time. None if that would be more than 6 days back (too stale to
+    place the weekday with certainty)."""
+    clock, weekday = text.split()
+    t = datetime.strptime(clock, "%I.%M%p")
+    for back in range(7):
+        day = issued.date() - timedelta(days=back)
+        if day.strftime("%a") == weekday:
+            when = datetime.combine(day, t.time())
+            # A minute or two of slack: the reading can be stamped just after issue.
+            return when if when <= issued + timedelta(minutes=5) else None
+    return None
+
+
+def parse_bom(page):
+    """Rows (time_aest, gauge, value, datum) and {gauge: (name, datum)} from IDQ60286.
+
+    Table rows have 9 cells: name, type, time/day, height, datum, tendency, crossing,
+    flood class, links. The station number comes from the "Table" link
+    (IDQ65389.<station>.tbl.shtml). Rows with no current reading are skipped.
+    """
+    m = re.search(r"Issued at\s+(\d\d:\d\d [AP]M) AEST \w+ (\d+ \w+ \d{4})", page)
+    if not m:
+        raise ValueError("no 'Issued at' time in the bulletin")
+    issued = datetime.strptime(f"{m.group(2)} {m.group(1)}", "%d %B %Y %I:%M %p")
+    rows, stations = [], {}
+    for tr in re.findall(r"<tr>(.*?)</tr>", page, re.S):
+        cells = [html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", c))).strip()
+                 for c in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)]
+        sid = re.search(r"IDQ65389\.(\w+)\.tbl", tr)
+        if len(cells) != 9 or not sid or not cells[0].startswith(BOM_PREFIX):
+            continue
+        name, _, when, height, datum = cells[:5]
+        stations[sid.group(1)] = (name[len(BOM_PREFIX):], datum)
+        if not when or not height:
+            continue                      # manual gauge, or no reading at present
+        t = bom_reading_time(when, issued)
+        if t is not None:
+            rows.append((fmt(t), sid.group(1), f"{float(height):.3f}", datum))
+    if not stations:
+        raise ValueError("no Brisbane River gauges found: has the bulletin's layout changed?")
+    return rows, stations
+
+
+def fetch_bom():
+    """BoM Brisbane basin bulletin over FTP. Returns (rows, stations); see parse_bom."""
+    with urllib.request.urlopen(BOM_URL, timeout=120) as resp:
+        return parse_bom(resp.read().decode("latin-1"))
+
+
+def write_bom_stations(folder, stations):
+    """bom/stations.csv: every Brisbane River gauge seen in the bulletin, merged with
+    any listed before (a gauge can drop out of the bulletin for a while)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "stations.csv"
+    old = {}
+    if path.exists():
+        with path.open(newline="") as f:
+            old = {r["gauge"]: (r["name"], r["datum"]) for r in csv.DictReader(f)}
+    old.update(stations)
+    with path.open("w", newline="") as f:
+        w = csv.writer(f, lineterminator="\n")
+        w.writerow(["gauge", "name", "datum"])
+        for g, (n, d) in sorted(old.items()):
+            w.writerow([g, n, d])
+
+
 def merge(folder, rows, fields=FIELDS):
     """Merge rows into folder/YYYY-MM.csv files. Returns the number of new or changed rows.
 
@@ -164,15 +251,26 @@ def merge(folder, rows, fields=FIELDS):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    sources = ["bcc", "msq_bar", "cds", "bom"]
     ap.add_argument("--out", required=True, help="folder to write into (gauge-data checkout)")
+    ap.add_argument("--sources", nargs="+", choices=sources, default=sources,
+                    help="which sources to fetch (default: all)")
     args = ap.parse_args()
     out = Path(args.out)
+
+    def bom():
+        rows, stations = fetch_bom()
+        write_bom_stations(out / "bom", stations)
+        return rows
 
     # Fetch each source separately, so one being down doesn't lose the other.
     failed = []
     for name, fetcher, fields in [("bcc", fetch_bcc, FIELDS),
                                   ("msq_bar", fetch_msq_bar, FIELDS),
-                                  ("cds", fetch_cds, CDS_FIELDS)]:
+                                  ("cds", fetch_cds, CDS_FIELDS),
+                                  ("bom", bom, BOM_FIELDS)]:
+        if name not in args.sources:
+            continue
         try:
             rows = fetcher()
         except Exception as e:            # network or format problem: report, carry on

@@ -37,8 +37,9 @@ jobs:
           ref: gauge-data
           path: data
       # Standard library only, so the runner's own Python is enough.
+      # BoM river heights have their own 15-min workflow (collect-bom.yml).
       - name: Collect
-        run: python3 code/collect_gauges.py --out data
+        run: python3 code/collect_gauges.py --out data --sources bcc msq_bar cds
       # Runs even if one source failed, so the other source's readings are kept.
       # The job still shows as failed (and GitHub emails) when the script did.
       - name: Commit new readings
@@ -52,7 +53,13 @@ jobs:
             echo "No new readings."
           else
             git commit -q -m "Collect gauges $(TZ=Australia/Brisbane date '+%Y-%m-%d %H:%M') AEST"
-            git push -q origin gauge-data
+            # collect-bom.yml also pushes to gauge-data (different folder), so retry
+            # after a rebase if it got in first.
+            for i in 1 2 3; do
+              git pull -q --rebase origin gauge-data && git push -q origin gauge-data && exit 0
+              sleep 10
+            done
+            exit 1
           fi
 
   # Flow reports from the "Report the flow" page: rewrite the reports branch from the
