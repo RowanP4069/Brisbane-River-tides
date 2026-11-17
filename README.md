@@ -1,6 +1,6 @@
 # Measured water levels: Brisbane River (gauge-data branch)
 
-This branch holds **data only**. It's added to once a day by `collect_gauges.py`, run by the `collect-gauges` workflow on the `main` branch. The project's code and documentation are on `main`; see `docs/data-sources.md` there for how the sources were chosen.
+This branch holds **data only**. It's added to by `collect_gauges.py` on the `main` branch: once a day by the `collect-gauges` workflow, and every 15 minutes for BoM river heights by the `collect-bom` workflow. The project's code and documentation are on `main`; see `docs/data-sources.md` there for how the sources were chosen.
 
 The sources keep only a short window (72 hours for the council gauges, about a week for the Bar, 7 days for the storm tide gauges), so this branch is the long-term record.
 
@@ -51,12 +51,22 @@ Collected from 2026-11-09. Columns: `time_aest, gauge, value_m, prediction_m`. V
 | coombabahst | Coombabah (Broadwater) |
 | goldcoast | Gold Coast Seaway (Southport) |
 
+### `bom/YYYY-MM.csv`: Bureau of Meteorology river heights
+
+Collected from 2026-11-17. Columns: `time_aest, gauge, value_m, datum`. Every gauge on the Brisbane River itself (station names "Brisbane River at ...") in BoM's Brisbane basin river height bulletin, IDQ60286, fetched from BoM's public anonymous FTP (`ftp://ftp.bom.gov.au/anon/gen/fwo/IDQ60286.html`). `gauge` is the BoM station number; `bom/stations.csv` gives each one's name and datum.
+
+- `datum` is as the bulletin gives it: `AHD`, or `LGH` (local gauge height, metres above the gauge's own zero). 540063 Colleges Crossing is LGH with gauge zero 0.00 m AHD (BoM flood warning network, Section 6), so its values are m AHD.
+- The bulletin holds only each gauge's **latest** reading, and many gauges report on each 0.05 m step rather than on a clock. So this series is only as complete as the 15-minute runs, which GitHub sometimes delays or skips: readings between runs are missed. BoM's web table for a gauge keeps about two weeks; gaps can be filled from it by hand in a browser (it is never fetched by script).
+- The bulletin gives the reading time as e.g. "02.14PM Tue"; the date is the latest such day at or before the bulletin's issue time. Readings that would be more than 6 days old are skipped.
+- Some gauges here are the same instruments as in `bcc/` (e.g. 540683 St Lucia = E1856), through a different route.
+
 ## Licence and attribution
 
-All three sources are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The files here are unchanged copies, merged by date, except that for the storm tide gauges the residual column (measured minus predicted) and empty slots are left out.
+The BCC, MSQ and storm tide sources are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The files here are unchanged copies, merged by date, except that for the storm tide gauges the residual column (measured minus predicted) and empty slots are left out.
 
 - Telemetry sensors: Rainfall and Stream heights © Brisbane City Council, CC BY 4.0. <https://data.brisbane.qld.gov.au/explore/dataset/telemetry-sensors-rainfall-and-stream-heights-observations>
 - Brisbane Bar tide gauge near real time data © State of Queensland (Maritime Safety Queensland, Department of Transport and Main Roads), CC BY 4.0. <https://www.data.qld.gov.au/dataset/brisbane-bar-tide-gauge-near-real-time-data>
 - Coastal Data System – Near real time storm tide data © State of Queensland (Department of Environment, Tourism, Science and Innovation), CC BY 4.0. <https://www.data.qld.gov.au/dataset/coastal-data-system-near-real-time-storm-tide-data>
 
 **Not for navigation or flood warnings.** For current warnings, use the Bureau of Meteorology.
+- River heights from the Bureau of Meteorology, © Commonwealth of Australia, river height bulletin IDQ60286. The bulletin says its material is licensed under the Creative Commons Attribution Australia Licence unless otherwise noted, and that most river height data is supplied to BoM by other agencies, whose terms apply. No other terms are noted for these gauges (checked 2026-11-17); they will be removed if a supplying agency objects.
