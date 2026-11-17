@@ -93,6 +93,20 @@ FLOOR_MARGIN_M = 0.05  # readings within this of the floor are left out
 
 REF = pd.Timestamp("2026-01-01")    # times become minutes since this, for the fits
 
+# Colleges Crossing (BoM 540063, km 83.81), above Kholo Creek: compared with the
+# Guesswork page's GUESS there (data/guesses.csv), not with a prediction. Its readings
+# are m AHD (gauge zero 0.00 AHD). bom-filled/ holds the full series from BoM's web
+# table, bom/ the 15-minute FTP collection.
+GUESS_GAUGE = "540063"
+GUESS_FEATURE = "gauge-colleges-crossing"   # its km, from data/features.csv
+# BoM's series has one-off telemetry glitches: a single reading often 0.40 or 0.80 m out
+# (8 or 16 of the gauge's 0.05 m steps), back to normal minutes later, usually in the
+# same minute as a real reading (see guess_readings). A lone reading this far from the
+# median of it and its 4 neighbours is dropped too. Freshwater rises are gradual (step
+# by step), so they stay in.
+SPIKE_M = 0.25
+GUESS_FLOOR_M = 0.59  # 540063 reads nothing below this (data/features.csv, from BoM)
+
 
 # --- Inputs ----------------------------------------------------------------------
 
@@ -125,7 +139,59 @@ def gauge_list(stations):
     for col in ["lag_hw_min", "lag_lw_min"]:
         g[col] = np.interp(g.chainage_km, stations.chainage_km, stations[col])
     g["datum"] = np.where(g.sensor_id == BAR_GAUGE, "LAT", "AHD")
-    return g
+    g["guess"] = False
+    return pd.concat([g, pd.DataFrame([guess_gauge(stations)])], ignore_index=True)
+
+
+def guess_gauge(stations):
+    """Colleges Crossing, with the Guesswork page's guesses for it: G-lag and G-ratio,
+    and Kholo Creek's MSL (heights on Kholo Creek's LAT), as river_tides.py --sandbox.
+    There are no published lags here. G-floor-cc (0.75 m above Kholo LAT, about
+    -0.35 m AHD by G-datum) lies below the gauge's own 0.59 m floor, so it is not
+    applied: it would only change predictions where the readings are left out anyway."""
+    from river_tides import load_guesses
+    gs = load_guesses(DATA / "guesses.csv")
+    fe = pd.read_csv(DATA / "features.csv").set_index("feature_id")
+    kholo = stations.iloc[-1]                      # the last station upstream
+    return {"sensor_id": GUESS_GAUGE, "short": "Colleges Crossing",
+            "name": "Colleges Crossing (BoM 540063)",
+            "chainage_km": float(fe.loc[GUESS_FEATURE, "km"]),
+            "lag_min": float(gs.loc["G-lag", "value"]), "ratio": float(gs.loc["G-ratio", "value"]),
+            "msl_m": float(kholo.msl_m), "lag_hw_min": np.nan, "lag_lw_min": np.nan,
+            "datum": "AHD", "guess": True,
+            # G-datum: Kholo LAT in m AHD, so LAT lies -value below AHD.
+            "guess_lat_below_ahd_m": -float(gs.loc["G-datum", "value"])}
+
+
+def guess_readings(ref):
+    """540063 readings: the full web-table series (bom-filled/) plus the FTP collection
+    (bom/), the same reading from both kept once, with glitches dropped (SPIKE_M)."""
+    parts = [read_branch(ref, f) for f in ("bom-filled", "bom")]
+    r = pd.concat(parts)
+    r = r[r.gauge == GUESS_GAUGE].dropna(subset=["value_m"]).drop_duplicates(subset=["time", "value_m"])
+    r = r.sort_values("time", kind="stable").reset_index(drop=True)
+    n0 = len(r)
+    # 1. Most glitches share their minute with a real reading (e.g. 0.99 and 1.79 at
+    #    10:57). Where a minute has more than one value, keep the one nearest the middle
+    #    of the readings in the minutes either side.
+    times = r.time.drop_duplicates().reset_index(drop=True)
+    first = r.groupby("time").value_m.first()
+    keep = []
+    for i, t in enumerate(times):
+        vals = r.value_m[r.time == t]
+        if len(vals) == 1 or vals.nunique() == 1:
+            keep.append(vals.index[0])
+            continue
+        around = [first[times[j]] for j in (i - 1, i + 1) if 0 <= j < len(times)]
+        mid = np.mean(around) if around else vals.median()
+        keep.append((vals - mid).abs().idxmin())
+    r = r.loc[keep].reset_index(drop=True)
+    # 2. A remaining single reading far from its neighbours (SPIKE_M).
+    med = r.value_m.rolling(5, center=True, min_periods=1).median()
+    spike = (r.value_m - med).abs() >= SPIKE_M
+    print(f"{GUESS_GAUGE}: {n0} readings; {n0 - len(r)} glitches sharing a minute and "
+          f"{spike.sum()} lone spikes dropped")
+    return r[~spike][["gauge", "value_m", "time"]]
 
 
 # --- High and low water ------------------------------------------------------------
@@ -267,7 +333,10 @@ def analyse(row, readings, bar, bar_msl):
     pred = heights(bar, times, pts, bar_msl)[:, 0]
     meas = r.value_m.values
     fit = row.sensor_id != BAR_GAUGE
-    floor = find_floor(minutes(times), meas) if fit else None
+    # Colleges Crossing's floor is known (BoM: it reads nothing below 0.59 m), and a
+    # long quiet spell in a fresh (e.g. 16 Nov, 0.89 -> 0.84 m over 5 h) would fool
+    # find_floor, so it isn't detected there.
+    floor = GUESS_FLOOR_M if row.guess else find_floor(minutes(times), meas) if fit else None
     # Readings at or near a floor are not real levels: leave them out of everything
     # except the plot.
     ok = meas > floor + FLOOR_MARGIN_M if floor is not None else np.ones(len(meas), bool)
@@ -311,6 +380,9 @@ def analyse(row, readings, bar, bar_msl):
         "model_lag_min": row.lag_min,
         "pub_hw_lag_min": row.lag_hw_min, "pub_lw_lag_min": row.lag_lw_min,
         "meas_hw_lag_min": row.lag_min + hw_dt, "meas_lw_lag_min": row.lag_min + lw_dt,
+        # Colleges Crossing: compared with the guess; its G-datum beside the fitted value.
+        "guess": bool(row.guess),
+        "guess_lat_below_ahd_m": row.guess_lat_below_ahd_m if row.guess else np.nan,
     }
     return summary, ev, page_gauge(row, times, meas, offset, floor, summary["step_cm"], ev)
 
@@ -339,7 +411,12 @@ def page_gauge(row, times, meas, offset, floor, step_cm, ev):
         # Readings at or below this are left out (None: no floor).
         "floor_cut_m": floor + FLOOR_MARGIN_M if floor is not None else None,
         "step_cm": step_cm,
-        "pub_hw_lag_min": float(row.lag_hw_min), "pub_lw_lag_min": float(row.lag_lw_min),
+        # None where MSQ publishes none (above Kholo Creek).
+        "pub_hw_lag_min": None if np.isnan(row.lag_hw_min) else float(row.lag_hw_min),
+        "pub_lw_lag_min": None if np.isnan(row.lag_lw_min) else float(row.lag_lw_min),
+        # Compared with the Guesswork guess, not a prediction (Colleges Crossing).
+        "guess": bool(row.guess),
+        "guess_lat_below_ahd_m": float(row.guess_lat_below_ahd_m) if row.guess else None,
         "t0": int(t[0]), "dt": np.diff(t).tolist(), "mm": mm.tolist(),
         "ev": {
             # Predicted time of each high/low water, whole minutes since REF: the page
@@ -436,7 +513,8 @@ def main():
     # The Bar reads every minute; every 5th minute is plenty for the fits and the page,
     # and matches the council gauges' 5-minute slots.
     bar_readings = bar_readings[bar_readings.time.dt.minute % 5 == 0]
-    readings = pd.concat([read_branch(args.ref, "bcc"), bar_readings])
+    readings = pd.concat([read_branch(args.ref, "bcc"), bar_readings,
+                          guess_readings(args.ref)])
     if args.since:
         readings = readings[readings.time >= pd.Timestamp(args.since)]
     if args.until:

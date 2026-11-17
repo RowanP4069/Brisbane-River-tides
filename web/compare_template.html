@@ -33,6 +33,9 @@
   th[title] { cursor:help; text-decoration: underline dotted; text-underline-offset:3px; }
   td:first-child, th:first-child { text-align:left; }
   td.few { color:var(--muted); }
+  /* Colleges Crossing: compared with a guess, not a prediction. */
+  tr.sep td { text-align:left; color:#6b4a00; background:#fff4d6; font-weight:600; white-space:normal; }
+  .gtag { color:#6b4a00; font-weight:600; }
   .note { color:var(--muted); font-size:12px; margin:6px 0 0; }
   h2 { font-size:14px; margin:18px 0 2px; }
   h2 .sub { color:var(--muted); font-weight:400; font-size:12px; }
@@ -109,6 +112,14 @@
     <li><b>Gauge floors.</b> The Jindalee and Moggill gauges go silent for hours around low water and come back at
       the same level, while the tide elsewhere keeps falling: most likely the sensor sits above low water and dries
       out. Readings near that level (the dashed line), and the low waters it hides, are left out.</li>
+    <li><b>Colleges Crossing</b> (Bureau of Meteorology gauge 540063, km 83.8) is above Kholo Creek, where MSQ
+      publishes no tide figures and the project makes no predictions. It is compared with the
+      <a href="guesswork.html">Guesswork</a> page's guesses instead (G-lag, G-ratio), so its timing and fitted
+      "LAT below AHD" test those guesses, shown beside G-datum. It reads m AHD in 5 cm steps and nothing below
+      0.59 m (BoM's own figure). BoM's series has one-off telemetry glitches (a single reading 0.40 or 0.80 m out,
+      back minutes later); these are left out. Freshwater after rain raises the whole level for hours or days and
+      is <i>not</i> left out, so it shows in the residuals (e.g. 16 Nov). Readings: BoM's web table for the gauge
+      from 1 Nov 2026, then the 15-minute collection.</li>
     <li><b>Range</b> compares each rise or fall: measured height change divided by predicted. Over a spring–neap cycle
       (about two weeks) it shows whether the model's single ratio per place fits big and small tides alike.</li>
   </ul>
@@ -120,7 +131,8 @@
     <a href="https://www.bom.gov.au/qld/flood/">Bureau of Meteorology</a>.</p>
   <p>Data: Telemetry sensors — Rainfall and Stream heights © Brisbane City Council, CC BY 4.0. Brisbane Bar tide
     gauge near real time data and tide predictions, tidal planes © State of Queensland (Maritime Safety Queensland),
-    CC BY 4.0.</p>
+    CC BY 4.0. Colleges Crossing river heights © Commonwealth of Australia (Bureau of Meteorology), Creative
+    Commons Attribution Australia licence.</p>
   <p id="built" hidden></p>
 </footer>
 
@@ -298,11 +310,18 @@ function render() {
   const a = FROM, b = TO + DAY_MS;
   let html = "<thead><tr>" + COLS.map(([h, t]) => `<th title="${t}">${h}</th>`).join("") + "</tr></thead><tbody>";
   for (const g of DATA.gauges) {
+    // Gauges above Kholo Creek come last, under a band saying what they're compared with.
+    if (g.guess && !DATA.gauges[DATA.gauges.indexOf(g) - 1].guess) {
+      html += `<tr class="sep"><td colspan="${COLS.length}">Above Kholo Creek: compared with a <a href="guesswork.html">guess</a>, `
+        + "not a prediction (MSQ publishes nothing here). Model columns are the guesses G-lag, G-ratio and, beside "
+        + "the fitted LAT below AHD, G-datum.</td></tr>";
+    }
     const s = windowStats(g, a, b);
     const timing = (m, sdv, n) => n ? `${f(m, 0, true)} ± ${sdv === null ? "–" : sdv.toFixed(0)} (${n})` : "–";
-    const datum = g.datum === "LAT" ? `${f(s.bar_mean_resid_m, 2, true)} weather` : f(-g.offset_m, 2);
+    const datum = g.datum === "LAT" ? `${f(s.bar_mean_resid_m, 2, true)} weather`
+      : f(-g.offset_m, 2) + (g.guess ? ` <span class="gtag">(G-datum ${f(g.guess_lat_below_ahd_m, 2)})</span>` : "");
     const lag2 = (x, y) => `${f(x, 0)} / ${f(y, 0)}`;
-    html += `<tr><td>${g.short} <span class="lab">${g.km.toFixed(1)} km</span></td>`
+    html += `<tr><td>${g.short} <span class="lab">${g.km.toFixed(1)} km</span>${g.guess ? ' <span class="gtag">guess</span>' : ""}</td>`
       + `<td>${s.readings}</td><td>${g.step_cm < 1 ? "<1" : g.step_cm.toFixed(0)} cm</td>`
       + `<td>${datum}${g.floor_m !== null ? " *" : ""}</td>`
       + `<td>${f(s.rms_m, 2)}</td><td>${f(s.p95_abs_m, 2)}</td>`
@@ -310,7 +329,8 @@ function render() {
       + `<td class="${s.n_lw < 3 ? "few" : ""}">${timing(s.lw_dt_min, s.lw_dt_sd, s.n_lw)}</td>`
       + `<td>${f(s.hw_dh_m, 2, true)}</td><td>${f(s.lw_dh_m, 2, true)}</td>`
       + `<td>${s.n_range ? `${f(s.range_ratio, 2)} (${s.n_range})` : "–"}</td>`
-      + `<td>${f(g.lag_min, 0)}</td><td>${lag2(g.pub_hw_lag_min, g.pub_lw_lag_min)}</td>`
+      + `<td>${f(g.lag_min, 0)}${g.guess ? " G-lag" : ""}</td>`
+      + `<td>${g.pub_hw_lag_min === null ? "none" : lag2(g.pub_hw_lag_min, g.pub_lw_lag_min)}</td>`
       + `<td>${lag2(s.meas_hw_lag_min, s.meas_lw_lag_min)}</td></tr>`;
   }
   $("table").innerHTML = html + "</tbody>";
@@ -374,7 +394,8 @@ function plotHtml(g, a, b) {
   s += `<path class="pred" d="${path(pt, ph, Y1, Infinity)}"/>`
     + `<path class="meas" d="${path(tt, hh, Y1, 30 * MIN_MS)}"/>`
     + `<path class="resid" d="${path(tt, rr, Y2, 30 * MIN_MS)}"/></svg>`;
-  return `<h2>${g.name} <span class="sub">${g.id}, ${g.km.toFixed(1)} km from the Bar`
+  return `<h2>${g.name}${g.guess ? ' <span class="gtag">vs guess</span>' : ""} <span class="sub">${g.id}, ${g.km.toFixed(1)} km from the Bar`
+    + `${g.guess ? ", compared with the Guesswork guess, not a prediction" : ""}`
     + `${tt.length ? "" : " — no readings in this period"}</span></h2><div class="plot">${s}</div>`;
 }
 
