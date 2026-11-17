@@ -12,6 +12,7 @@ Placeholders marked `TODO` are things I couldn't confirm from here. Fill them in
 | `centreline.csv` | Single ordered river centreline, Brisbane Bar gauge upstream, with chainage | Derived by `build_centreline.py` from the file above |
 | `features.csv` | Gravel runs and landmarks between Kholo Creek and the old weir ruin | Field visits and OpenStreetMap |
 | `observations.csv` | What field visits showed at those features (run running or drowned, water surface) | Field visits, with photos and videos kept privately |
+| `guesses.csv` | Named, dated guesses for the Guesswork (sandbox) page above Kholo Creek | The project's own guesses; not predictions |
 
 ---
 
@@ -112,6 +113,13 @@ What field visits showed, one row per thing seen: whether a gravel run was runni
 - **Columns:** `obs_id` (date and number), `time_from_aest`, `time_to_aest`, `feature_id` (from `features.csv`, blank if none), `km_from`, `km_to`, `quantity`, `value`, `confidence`, `kholo_min_m`, `kholo_max_m`, `evidence` (media file names, kept privately, and any flow reports), `observer`, `notes`.
 
 ---
+
+## `guesses.csv`
+
+- **What:** the guesses behind the Guesswork page (`river_tides.py --sandbox`), from Kholo Creek (km 75.8) to the old weir ruin (km 87.4). **Not predictions and not hypotheses** (those are in `docs/hypotheses.md`). The normal predictions page doesn't read this file.
+- **Rows:** `G-lag` (min) and `G-ratio`, used for every point above Kholo Creek, whose MSL stays at Kholo Creek's, so heights there are on Kholo Creek's LAT; `G-datum` (Kholo Creek's LAT in m AHD; the page shows heights in m AHD as height + this); `G-floor-*` (a gravel-run crest in m above Kholo LAT at `km`: above it, the water is held at the crest when the tide is lower).
+- **Columns:** `id`, `dated` (when the value was set), `value`, `unit`, `feature_id` (from `features.csv`, for crests), `km`, `not_a_test_on` (dates, `;`-separated, whose data the guess was tuned on, so they can't test it), `basis` (where the number comes from).
+- **Changing a guess:** change `value` and `basis`, and set `dated` to the day of the change.
 
 ## `stations.csv`
 

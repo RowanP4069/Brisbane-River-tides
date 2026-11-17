@@ -1,0 +1,6 @@
+id,dated,value,unit,feature_id,km,not_a_test_on,basis
+G-lag,2026-11-17,160,min,,,,"Held at MSQ's Kholo Creek mean lag (data/stations.csv). Knowingly differs from H1, which puts high water at km 83.7 about 8 to 24 min later; a guess claims nothing and H1 is unchanged."
+G-ratio,2026-11-17,1.25,,,,,"Held at the Kholo Creek ratio (data/stations.csv, the mean of MSQ's spring and neap range ratios). Heights above Kholo are on Kholo Creek's LAT, with its MSL (1.10 m)."
+G-datum,2026-11-17,-1.10,m AHD,,,,"Kholo Creek LAT is 1.10 m below AHD. From the measured-vs-predicted fits (LAT about AHD - 1.07 to 1.17 m from St Lucia to Oxley), not from Colleges Crossing data, so gauge 540063 and the level marks can check it."
+G-floor-cc,2026-11-17,0.75,m above Kholo LAT,run-colleges-crossing,83.8,2026-11-14;2026-11-15,"Crest of the Colleges Crossing bridge run. On 2026-11-15 it was running up to a Kholo height of 0.63 m, marginal at 0.69-0.82 m and drowned from 0.88 m (on a day with fresh flow). The run 50 m upstream is not modelled separately."
+G-floor-ruin,2026-11-17,1.95,m above Kholo LAT,run-below-ruin,87.3,2023-06-04,"Crest of the run below the old weir ruin. Not drowned at a Kholo high water of 1.85 m on 2023-06-04, yet paddled over on the flood on bigger tides. The least certain guess."

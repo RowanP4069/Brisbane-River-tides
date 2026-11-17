@@ -58,13 +58,25 @@
   footer { padding:6px 16px 10px; font-size:11px; color:var(--muted); }
   footer p { margin:2px 0; }
   .warn { color:#8a4b00; }
+  /* Sandbox (Guesswork) page only: banner, observation list and the guesses. */
+  #sandboxBanner { width:100%; margin:2px 0; padding:4px 10px; border-radius:3px; font-weight:600;
+    background:repeating-linear-gradient(135deg,#fff4d6 0 10px,#fbe6b0 10px 20px); color:#6b4a00;
+    border:1px solid #e0c27a; }
+  #obsList { padding:4px 16px 0; font-size:12px; color:var(--muted); background:var(--panel); }
+  #obsList p { margin:1px 0; font-variant-numeric:tabular-nums; }
+  #obsList .now { color:var(--fg); font-weight:600; }
+  #guessList table { border-collapse:collapse; margin:4px 0; }
+  #guessList td, #guessList th { text-align:left; vertical-align:top; padding:2px 8px 2px 0; }
+  #guessList td:nth-child(-n+2) { white-space:nowrap; }
   .deck-tooltip { font-size:12px !important; }
 </style>
 </head>
 <body>
 <header>
-  <nav class="pages"><a href="index.html" aria-current="page">Height predictions</a><a href="gauges.html">Gauges (measured)</a><a href="compare.html">Measured vs predicted</a><a href="report.html">Report the flow</a><a href="results.html">Report the flow (results)</a></nav>
-  <h1>Brisbane River tide height predictions: Brisbane Bar to Kholo Creek</h1>
+  <nav class="pages"><a href="index.html" aria-current="page">Height predictions</a><a href="gauges.html">Gauges (measured)</a><a href="compare.html">Measured vs predicted</a><a href="report.html">Report the flow</a><a href="results.html">Report the flow (results)</a><a href="guesswork.html" title="Guesswork: Kholo Creek to the weir ruin (sandbox)">WAG</a></nav>
+  <p id="sandboxBanner" hidden>Sandbox. Guesses, not predictions. Above Kholo Creek every height here comes
+    from a named, dated guess (listed at the bottom of the page), not from published tide figures.</p>
+  <h1 id="title">Brisbane River tide height predictions: Brisbane Bar to Kholo Creek</h1>
   <span class="sub" id="subtitle"></span>
 </header>
 
@@ -130,8 +142,14 @@
   <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#174f80" stroke-width="2" stroke-dasharray="5 3"/></svg> lowest</span>
   <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#1d2329" stroke-width="1.5"/></svg> level at the time shown</span>
   <span><svg width="22" height="10" aria-hidden="true"><line x1="11" y1="0" x2="11" y2="10" stroke="#762a83" stroke-width="2"/></svg> marked place</span>
+  <!-- Sandbox page only (shown by the script). -->
+  <span class="sbKey" hidden><svg width="22" height="10" aria-hidden="true"><defs><pattern id="kh" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="#fff" stroke-width="2"/></pattern></defs><rect width="22" height="10" fill="rgb(232,171,161)"/><rect width="22" height="10" fill="url(#kh)"/></svg> guess (pale, hatched)</span>
+  <span class="sbKey" hidden><svg width="22" height="10" aria-hidden="true"><rect width="22" height="10" fill="rgb(176,138,74)"/><rect width="22" height="10" fill="url(#kh)"/></svg> running fresh: held up by a gravel run (guess)</span>
+  <span class="sbKey" hidden><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#7a5a1e" stroke-width="1.5" stroke-dasharray="3 2"/></svg> guessed run crest</span>
+  <span class="sbKey" hidden><svg width="22" height="10" aria-hidden="true"><circle cx="11" cy="5" r="4" fill="#1d2329"/></svg> our observation (solid at the time shown)</span>
 </div>
 <div id="profileWrap"><canvas id="profile"></canvas><div id="ptip"></div></div>
+<div id="obsList" hidden></div>
 
 <footer>
   <p><b>Predicted astronomical tide only.</b> Excludes river flow, wind, storm surge and dam releases. Colours are
@@ -143,6 +161,7 @@
   <p>Data: Brisbane Bar predictions and 2026–2027 tidal planes © State of Queensland (Maritime Safety Queensland), CC BY 4.0.
     River centreline: Watercourse lines - Queensland © State of Queensland (Department of Resources), CC BY 4.0.
     Basemap attribution on the map.</p>
+  <div id="guessList" hidden></div>
   <p id="built" hidden></p>
 </footer>
 
@@ -196,6 +215,26 @@ function computeWindow(startMs, hours, stepMin) {
 }
 // ---- Model: END --------------------------------------------------------------------
 
+// ---- Sandbox (Guesswork page only) ----------------------------------------------------
+// river_tides.py --sandbox adds DATA.sandbox. Points above SB.from_km (Kholo Creek) are
+// GUESSES: their lag and ratio are G-lag and G-ratio (already in DATA.model), their
+// heights are on Kholo Creek's LAT, and G-floor crests hold the water up above each
+// gravel run (applied in setWindow, after the model). See data/guesses.csv.
+const SB = DATA.sandbox || null;
+const GUESS = P.chainage_km.map(km => !!SB && km > SB.from_km + 1e-9);
+// FLOOR[p]: the highest guessed crest below point p, or -Infinity (none).
+const FLOOR = P.chainage_km.map(km => !SB ? -Infinity
+  : Math.max(-Infinity, ...SB.floors.filter(fl => km > fl.km + 1e-9).map(fl => fl.crest_m)));
+const floorAt = p => SB.floors.filter(fl => P.chainage_km[p] > fl.km + 1e-9)
+  .reduce((a, fl) => !a || fl.crest_m > a.crest_m ? fl : a, null);
+if (SB) {                                     // ($ isn't defined yet here)
+  document.getElementById("sandboxBanner").hidden = false;
+  document.getElementById("title").textContent = "Guesswork: Kholo Creek to the old weir ruin (sandbox)";
+  document.querySelector('nav.pages a[href="index.html"]').removeAttribute("aria-current");
+  document.querySelector('nav.pages a[href="guesswork.html"]').setAttribute("aria-current", "page");
+  for (const el of document.querySelectorAll(".sbKey")) el.hidden = false;
+}
+
 // ---- Which days can be shown ---------------------------------------------------------
 // A window starts at a day's 00:00 plus TOD_MS: the time of day of river_tides.py --start
 // (00:00 unless a time was given), kept when another day is picked. A day is offered
@@ -211,7 +250,8 @@ const brisbaneToday = () => Math.floor((Date.now() + 10 * 3600000) / DAY_MS) * D
 
 // ---- The window shown: set by setWindow() ------------------------------------------
 // H[frame][point]: m above local LAT. Everything below is recomputed for each window.
-let TIMES, H, NF, WINDOW_LABEL, localMin, rate, slope, RATE_MAX, SLOPE_MAX;
+// HELD[frame][point]: true where a guessed run crest holds the water up (sandbox only).
+let TIMES, H, HELD, NF, WINDOW_LABEL, localMin, rate, slope, RATE_MAX, SLOPE_MAX;
 
 // Reach where the published lag falls going upstream: Indooroopilly -> Seventeen Mile
 // Rocks, at the stations' chainages. The ONE copy of these numbers: the profile shading
@@ -240,6 +280,13 @@ const BASES = {
 function setWindow(startMs, hours) {
   ({ times: TIMES, heights: H } = computeWindow(startMs, hours, STEP_MIN));
   NF = TIMES.length;
+  // Sandbox: above a guessed gravel-run crest the water can't fall below the crest; the
+  // run is then "running fresh". Everything below (rates, envelope) uses the held height.
+  HELD = H.map(row => row.map((h, p) => {
+    if (!(h < FLOOR[p])) return false;
+    row[p] = FLOOR[p];
+    return true;
+  }));
   // Window length for labels, e.g. "48 h": the span from first to last frame, so a
   // --step-min that doesn't divide it shows e.g. 23.9.
   WINDOW_LABEL = `${+((NF - 1) * dtHours).toFixed(1)} h`;
@@ -312,6 +359,15 @@ const COLOURS = {
   slope: (f, p) => diverge(slope[f][p], SLOPE_MAX),
 };
 const css = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+// Sandbox: a guess bar is the normal colour taken GUESS_PALE of the way to white (and
+// hatched on the profile); a bar held up by a run crest is gravel brown instead.
+const GUESS_PALE = 0.55, C_FRESH = [176, 138, 74];
+const pale = c => c.map(v => Math.round(v + (255 - v) * GUESS_PALE));
+function barColour(f, p) {
+  if (HELD[f][p]) return C_FRESH;
+  const c = COLOURS[state.colour](f, p);
+  return GUESS[p] ? pale(c) : c;
+}
 // The marked place: a purple used by nothing else on the page.
 const MARK_RGB = [118, 42, 131], MARK_CSS = css(MARK_RGB);
 
@@ -371,7 +427,8 @@ function fmtTime(iso) {
   return d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }) + " " + iso.slice(11, 16);
 }
 function renderSubtitle() {
-  $("subtitle").textContent = `Predicted, ${fmtTime(TIMES[0])} to ${fmtTime(TIMES[NF - 1])} AEST, `
+  $("subtitle").textContent = `${SB ? `Predicted to Kholo Creek (km ${SB.from_km}), guessed above it` : "Predicted"}, `
+    + `${fmtTime(TIMES[0])} to ${fmtTime(TIMES[NF - 1])} AEST, `
     + `${NF} frames every ${STEP_MIN} min, bars every ${SPACING_M} m`;
   $("keyWindow").textContent = WINDOW_LABEL;
 }
@@ -407,9 +464,11 @@ let map = null;
 try {
   // Opening view picked by eye to frame Brisbane Bar -> Kholo Creek, tilted and turned
   // slightly so the bars stand up in front of the viewer. Not calculated from the data.
+  // The sandbox opens on Moggill to the weir ruin instead (also picked by eye).
   map = new maplibregl.Map({
     container: "map", style: MAP_STYLE,
-    center: [152.975, -27.5], zoom: 10.7, pitch: 55, bearing: -15, maxPitch: 75,
+    ...(SB ? { center: [152.825, -27.56], zoom: 12.2 } : { center: [152.975, -27.5], zoom: 10.7 }),
+    pitch: 55, bearing: -15, maxPitch: 75,
   });
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
 } catch (err) {
@@ -448,7 +507,10 @@ function makeCallout(s, colour, border) {
   calloutLayer.appendChild(label);
   return { s, line, dot, label, w: 0, h: 0 };
 }
-const callouts = !map ? [] : DATA.stations.map(s => makeCallout(s, "#1d2329", "rgba(29,35,41,.35)"));
+// Labelled places: the MSQ stations, plus on the sandbox page a few features above Kholo
+// (the ones river_tides.py gives a short name).
+const LABELLED = [...DATA.stations, ...(SB ? SB.places.filter(pl => pl.short) : [])];
+const callouts = !map ? [] : LABELLED.map(s => makeCallout(s, "#1d2329", "rgba(29,35,41,.35)"));
 // Each station's model point, so a mark there can take over the station's label.
 for (const c of callouts) c.p = nearestPoint(c.s.chainage_km);
 // The marked place's label: placed first, so it gets the shortest leader.
@@ -505,7 +567,7 @@ const idx = Array.from({ length: NP }, (_, i) => i);
 // overlap (170 m at the default 500 m spacing).
 const BAR_RADIUS_M = 0.34 * SPACING_M;
 function layers() {
-  const base = BASES[state.base], colourFn = COLOURS[state.colour], f = state.frame;
+  const base = BASES[state.base], f = state.frame;
   // The marked place: a ring on the ground around its bar (drawn first, under the bars).
   const mark = state.mark == null ? [] : [new deck.ScatterplotLayer({
     id: "mark", data: [state.mark], getPosition: i => [P.lon[i], P.lat[i]],
@@ -520,10 +582,13 @@ function layers() {
       id: "bars", data: idx, diskResolution: 12, radius: BAR_RADIUS_M, extruded: true, pickable: true,
       getPosition: i => [P.lon[i], P.lat[i]],
       getElevation: i => (base.f(f, i) - base.floor) * state.exag,
-      getFillColor: i => colourFn(f, i),
+      getFillColor: i => barColour(f, i),
       // deck.gl only re-runs an accessor when a value in its trigger list changes, so
       // each list names everything that accessor depends on.
-      updateTriggers: { getElevation: [f, state.base, state.exag], getFillColor: [f, state.colour] },
+      // A new day or window length changes the heights at the same frame number, so
+      // state.day and state.hours are in both lists.
+      updateTriggers: { getElevation: [f, state.base, state.exag, state.day, state.hours],
+                        getFillColor: [f, state.colour, state.day, state.hours] },
       transitions: { getElevation: 120 },     // ms; smooths the height between frames
     }),
   ];
@@ -545,7 +610,20 @@ if (map) {
   }
 }
 
+// Sandbox: a guess point's height in words, e.g. "1.62 m above Kholo LAT, 0.52 m AHD
+// (G-datum)", plus the run holding it up, if any.
+const ahd = h => h + SB.datum_ahd;
+function guessText(f, p) {
+  const fl = HELD[f][p] ? floorAt(p) : null;
+  return `GUESS: ${H[f][p].toFixed(2)} m above Kholo LAT, ${ahd(H[f][p]).toFixed(2)} m AHD (G-datum)`
+    + (fl ? `, held up by ${fl.name} (running fresh)` : "");
+}
 function tipText(f, p) {
+  if (GUESS[p]) {
+    return `km ${P.chainage_km[p].toFixed(1)}  (G-lag ${P.lag_min[p].toFixed(0)} min, G-ratio ${P.ratio[p].toFixed(2)})\n`
+      + guessText(f, p) + "\n"
+      + `rate ${rate[f][p] >= 0 ? "+" : ""}${rate[f][p].toFixed(2)} m/h`;
+  }
   return `km ${P.chainage_km[p].toFixed(1)}  (lag ${P.lag_min[p].toFixed(0)} min, ratio ${P.ratio[p].toFixed(2)})\n`
     + `${H[f][p].toFixed(2)} m above local LAT   ${(H[f][p] - P.msl_m[p]).toFixed(2)} m vs MSL\n`
     + `rate ${rate[f][p] >= 0 ? "+" : ""}${rate[f][p].toFixed(2)} m/h   slope ${slope[f][p] >= 0 ? "+" : ""}${slope[f][p].toFixed(0)} mm/km`;
@@ -566,7 +644,7 @@ const LABEL_ANGLE = 0.6, LABEL_DROP = 18, MIN_LABEL_GAP_PX = 20;
 // note (t) and the km numbers plus tilted station names (b). b is sized from the
 // longest name, so names never run off the bottom of the canvas.
 ctx.font = FONT;
-const NAME_W = Math.max(...DATA.stations.map(s => ctx.measureText(s.short).width));
+const NAME_W = Math.max(...LABELLED.map(s => ctx.measureText(s.short).width));
 const PAD = {
   l: 64, r: 16, t: 14,
   b: Math.ceil(LABEL_DROP + NAME_W * Math.sin(LABEL_ANGLE) + 8 * Math.cos(LABEL_ANGLE)) + 6,
@@ -579,7 +657,7 @@ function sizeCanvas() {
 }
 function drawProfile() {
   const r = cv.getBoundingClientRect(), W = r.width, Ht = r.height;
-  const base = BASES[state.base], f = state.frame, colourFn = COLOURS[state.colour];
+  const base = BASES[state.base], f = state.frame;
   // y axis: from floor to max, rounded outwards to the nearest 0.5 m (the gridline step).
   const yLo = Math.floor(base.floor * 2) / 2, yHi = Math.ceil(base.max * 2) / 2;
   // km runs RIGHT TO LEFT: Brisbane Bar (km 0) on the right, upstream on the left,
@@ -594,6 +672,13 @@ function drawProfile() {
   ctx.fillRect(X(LAG_REVERSED[0]), PAD.t, X(LAG_REVERSED[1]) - X(LAG_REVERSED[0]), Ht - PAD.t - PAD.b);
   ctx.fillStyle = "#8a4b00"; ctx.textAlign = "center";
   ctx.fillText("lag reversed", X((LAG_REVERSED[0] + LAG_REVERSED[1]) / 2), PAD.t + 10);
+  // Sandbox: the guess reach, Kholo Creek to the weir ruin.
+  if (SB) {
+    ctx.fillStyle = "rgba(240,200,110,.18)";
+    ctx.fillRect(X(KM_MAX), PAD.t, X(SB.from_km) - X(KM_MAX), Ht - PAD.t - PAD.b);
+    ctx.fillStyle = "#6b4a00"; ctx.textAlign = "center";
+    ctx.fillText("guesses", X((SB.from_km + KM_MAX) / 2), PAD.t + 10);
+  }
 
   // Gridlines and y labels
   ctx.strokeStyle = "#e3e7ea"; ctx.fillStyle = "#5d6873"; ctx.textAlign = "right"; ctx.lineWidth = 1;
@@ -622,8 +707,25 @@ function drawProfile() {
   const bw = Math.max(1, Math.abs(X(P.chainage_km[1]) - X(0)) * 0.8);
   for (let p = 0; p < NP; p++) {
     const v = base.f(f, p), x = X(P.chainage_km[p]);
-    ctx.fillStyle = css(colourFn(f, p));
-    ctx.fillRect(x - bw / 2, Math.min(Y(v), Y(0)), bw, Math.abs(Y(v) - Y(0)) || 1);
+    const rect = [x - bw / 2, Math.min(Y(v), Y(0)), bw, Math.abs(Y(v) - Y(0)) || 1];
+    ctx.fillStyle = css(barColour(f, p));
+    ctx.fillRect(...rect);
+    if (GUESS[p]) { ctx.fillStyle = hatch(); ctx.fillRect(...rect); }   // guesses are hatched
+  }
+  // Sandbox: each guessed run crest, as a dashed line over the reach it holds up (to the
+  // next crest or the end). In the "above minimum" view it is shifted like the heights.
+  if (SB) {
+    ctx.strokeStyle = "#7a5a1e"; ctx.lineWidth = 1.5; ctx.setLineDash([3, 2]);
+    for (const fl of SB.floors) {
+      ctx.beginPath(); let first = true;
+      for (let p = 0; p < NP; p++) {
+        if (FLOOR[p] !== fl.crest_m) continue;
+        const y = Y(fl.crest_m + base.f(f, p) - H[f][p]), x = X(P.chainage_km[p]);
+        first ? ctx.moveTo(x, y) : ctx.lineTo(x, y); first = false;
+      }
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
   }
   // Edges of the envelope, drawn over the bars so the lowest line isn't hidden: highest
   // solid, lowest dashed, each on a white halo so it shows on red and blue bars alike.
@@ -643,6 +745,8 @@ function drawProfile() {
   for (let p = 0; p < NP; p++) { const x = X(P.chainage_km[p]), y = Y(base.f(f, p)); p ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
   ctx.stroke();
 
+  if (SB) drawObservations(X, Y, base, Ht);
+
   // Marked place: a vertical line, with a handle (a small triangle) in the top margin.
   if (state.mark != null) {
     const x = X(P.chainage_km[state.mark]);
@@ -661,7 +765,7 @@ function drawProfile() {
   // drawn is skipped (only happens on narrow screens).
   // Left to right across the screen (upstream first), so the skip rule below works.
   let lastNameX = -Infinity;
-  for (const s of [...DATA.stations].reverse()) {
+  for (const s of [...LABELLED].sort((a, b) => b.chainage_km - a.chainage_km)) {
     const x = X(s.chainage_km);
     ctx.beginPath(); ctx.moveTo(x, Ht - PAD.b); ctx.lineTo(x, Ht - PAD.b + 3); ctx.stroke();
     if (x - lastNameX < MIN_LABEL_GAP_PX) continue;
@@ -670,6 +774,82 @@ function drawProfile() {
     ctx.fillText(s.short, 0, 8); ctx.restore();
   }
 }
+// Diagonal white stripes for guess bars, made once (a canvas pattern).
+let hatchPattern = null;
+function hatch() {
+  if (!hatchPattern) {
+    const c = document.createElement("canvas"); c.width = c.height = 6;
+    const g = c.getContext("2d");
+    g.strokeStyle = "rgba(255,255,255,.75)"; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(-1, 7); g.lineTo(7, -1); g.moveTo(5, 7); g.lineTo(7, 5); g.moveTo(-1, 1); g.lineTo(1, -1); g.stroke();
+    hatchPattern = ctx.createPattern(c, "repeat");
+  }
+  return hatchPattern;
+}
+
+// ---- Our observations (sandbox) ------------------------------------------------------
+// The project's field observations above Kholo (data/observations.csv) that overlap the
+// window shown. Solid while the time shown is inside the observation's time span, hollow
+// otherwise. One at a level mark of known height (m AHD) is drawn at that height, on
+// Kholo LAT by G-datum; the rest sit in a row above the x axis, stacked if they share a km.
+const obsInWindow = () => !SB ? [] : SB.observations.filter(o =>
+  isoMs(o.to) >= isoMs(TIMES[0]) && isoMs(o.from) <= isoMs(TIMES[NF - 1]));
+const obsNow = o => { const t = isoMs(TIMES[state.frame]); return t >= isoMs(o.from) && t <= isoMs(o.to); };
+function drawObservations(X, Y, base, Ht) {
+  const stack = new Map(), f = state.frame;
+  for (const o of obsInWindow()) {
+    const x = X(o.km), p = nearestPoint(o.km);
+    let y;
+    if (o.height_m_ahd != null) {
+      y = Y(o.height_m_ahd - SB.datum_ahd + base.f(f, p) - H[f][p]);
+    } else {
+      const n = stack.get(o.km) || 0; stack.set(o.km, n + 1);
+      y = Ht - PAD.b - 7 - 11 * n;
+    }
+    ctx.beginPath();
+    if (o.height_m_ahd != null) {             // a diamond at a known height
+      ctx.moveTo(x, y - 6); ctx.lineTo(x + 6, y); ctx.lineTo(x, y + 6); ctx.lineTo(x - 6, y); ctx.closePath();
+    } else {
+      ctx.arc(x, y, 4.5, 0, 2 * Math.PI);
+    }
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "#1d2329";
+    ctx.fillStyle = obsNow(o) ? "#1d2329" : "#ffffff";
+    ctx.fill(); ctx.stroke();
+  }
+}
+// "Sun 10:12-10:40" (or one time) for an observation.
+function obsWhen(o) {
+  const a = fmtDayTime(o.from), b = o.to.slice(11, 16);
+  return o.from === o.to ? a : o.from.slice(0, 10) === o.to.slice(0, 10) ? `${a}–${b}` : `${a} to ${fmtDayTime(o.to)}`;
+}
+// Guard: an observation on a day a guess was tuned on can't be a test of that guess.
+function obsGuard(o) {
+  const ids = SB.guesses.filter(g => g.not_a_test_on.includes(o.from.slice(0, 10))).map(g => g.id);
+  return ids.length ? ` <i>(tuning day: not a test of ${ids.join(", ")})</i>` : "";
+}
+function renderObsList() {
+  if (!SB) return;
+  const list = obsInWindow(), el = $("obsList");
+  el.hidden = false;
+  el.innerHTML = !list.length ? "<p>No observations of ours above Kholo Creek in this window.</p>"
+    : "<p><b>Our observations in this window</b> (data/observations.csv):</p>" + list.map(o =>
+      `<p${obsNow(o) ? ' class="now"' : ""}>${obsWhen(o)} · km ${fmtKm(o.km)} · ${esc(o.feature || "river")}: `
+      + `${esc(o.quantity.replace(/_/g, " "))} ${esc(o.value)} (${esc(o.confidence)})`
+      + (o.height_m_ahd != null ? `, mark at ${o.height_m_ahd.toFixed(2)} m AHD` : "") + obsGuard(o) + "</p>").join("");
+}
+// The guesses, at the bottom of the page.
+function renderGuessList() {
+  const rows = SB.guesses.map(g => `<tr><td><b>${esc(g.id)}</b></td><td>${esc(g.dated)}</td>`
+    + `<td>${g.value}${g.unit ? " " + esc(g.unit) : ""}${g.km != null ? ` at km ${fmtKm(g.km)}` : ""}</td>`
+    + `<td>${esc(g.basis)}${g.not_a_test_on.length ? ` <i>Not a test on: ${g.not_a_test_on.join(", ")}.</i>` : ""}</td></tr>`);
+  $("guessList").innerHTML = "<p><b>The guesses</b> (data/guesses.csv). A guess tuned on a day's data can't count "
+    + "as a test on that day. Hypotheses with tests set in advance are kept separately, in docs/hypotheses.md; "
+    + "nothing on this page is one.</p><table><tr><th>Guess</th><th>Dated</th><th>Value</th><th>Basis</th></tr>"
+    + rows.join("") + "</table>";
+  $("guessList").hidden = false;
+}
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
 // Tooltip for the point nearest the pointer. Pointer events cover mouse, touch and pen;
 // pointerdown makes a tap on a touch screen show it too.
 // km under the pointer (the axis runs right to left).
@@ -715,6 +895,7 @@ function update() {
   $("back1h").disabled = t - HOUR_MS < FIRST_DAY + TOD_MS;
   $("fwd1h").disabled = t + HOUR_MS > lastDay(state.hours) + TOD_MS + (NF - 1) * STEP_MS;
   $("markInfo").innerHTML = markText();
+  renderObsList();
   if (overlay) overlay.setProps({ layers: layers() });
   drawProfile();
 }
@@ -731,6 +912,7 @@ $("exag").addEventListener("input", e => { state.exag = +e.target.value; update(
 const PLACES = [
   ...DATA.stations.map(s => ({ name: s.name, km: s.chainage_km, group: "Tide stations (MSQ)" })),
   ...(DATA.ramps || []).map(r => ({ name: r.name, km: r.chainage_km, group: "Boat ramps" })),
+  ...(SB ? SB.places : []).map(f => ({ name: f.name, km: f.chainage_km, group: "Above Kholo Creek (features)" })),
 ];
 const placeSel = $("place");
 for (const g of [...new Set(PLACES.map(pl => pl.group))]) {
@@ -785,6 +967,12 @@ function markText() {
   for (let f = 1; f < NF; f++) { if (H[f][p] > H[hi][p]) hi = f; if (H[f][p] < H[lo][p]) lo = f; }
   // Highest or lowest on the first or last frame: the turn may lie outside the window.
   const edge = f => f === 0 || f === NF - 1 ? " (window edge)" : "";
+  // Above Kholo: the guess wording, with AHD. "Lowest" may be the guessed run crest.
+  if (GUESS[p]) {
+    return `<b>${where}</b> · ${guessText(state.frame, p)}${HELD[state.frame][p] ? "" : ", " + trend}`
+      + ` · highest ${H[hi][p].toFixed(2)} m ${fmtDayTime(TIMES[hi])}${edge(hi)}`
+      + ` · lowest ${H[lo][p].toFixed(2)} m${HELD[lo][p] ? " (run crest)" : ` ${fmtDayTime(TIMES[lo])}${edge(lo)}`}`;
+  }
   return `<b>${where}</b> · ${H[state.frame][p].toFixed(2)} m above LAT, ${trend}`
     + ` · highest ${H[hi][p].toFixed(2)} m ${fmtDayTime(TIMES[hi])}${edge(hi)}`
     + ` · lowest ${H[lo][p].toFixed(2)} m ${fmtDayTime(TIMES[lo])}${edge(lo)}`;
@@ -878,6 +1066,7 @@ document.addEventListener("keydown", e => {
 });
 window.addEventListener("resize", () => { sizeCanvas(); drawProfile(); });
 
+if (SB) renderGuessList();
 sizeCanvas(); applyWindow(state.day, state.hours);
 markAtKm(hashKm);                           // a marked place from the address, if any
 </script>

@@ -42,6 +42,7 @@ Useful options (`--help` lists them all):
 - `--csv FILE ...`: different Brisbane Bar prediction file(s). By default it uses every `data/bar_YYYY_10min.csv`; 2026 and 2027 are committed. `fetch_bar.py --year YYYY` fetches another year.
 - `--json FILE`: also save the page data as JSON.
 - `--stamp`: show when the page was built (AEST). The hosted page uses it; it's off by default so repeat runs give identical files.
+- `--sandbox`: build the Guesswork page (`output/guesswork.html`) instead; see below.
 
 The page computes each day's heights itself, with the same formula as `river_tides.py`. Python works out everything about places (the points, and each one's lag, ratio and MSL). `check_parity.py` checks that the page and Python agree to within the 1 mm rounding, over a set of test days; run it after changing the model on either side (it needs Node.js). It also checks that the Measured vs predicted page's statistics match `compare_gauges.py`.
 
@@ -84,6 +85,14 @@ A fourth page, **Report the flow**, lets people on the river report which way th
 - A reach's match rate shows as "m of n" until it has 5 checkable reports, then as a percentage. Reports from one device are counted as one device, so a single keen paddler doesn't look like many confirmations.
 - Above Kholo Creek the page shows the hypotheses under test (`docs/hypotheses.md`) with their running tallies.
 - [docs/report-form-setup.md](docs/report-form-setup.md) says how the Google Form and its sheet are set up, to check or rebuild them.
+
+## Guesswork (WAG): Kholo Creek to the weir ruin
+
+A **sandbox**, not predictions: <https://rowanp4069.github.io/Brisbane-River-tides/guesswork.html> (kept out of search engines). It is the predictions page with the same model to Kholo Creek, carried on to the old weir ruin (km 87.4) with **guesses**, each named and dated in `data/guesses.csv`: G-lag and G-ratio (held at Kholo Creek's values), G-datum (Kholo Creek's LAT in m AHD, so heights can be read against the gauge and level marks) and G-floor (the crests of the gravel runs: above a run the water can't fall below its crest, and the bar shows it "running fresh"). Guess bars are pale and hatched; the project's own field observations are dark markers, with a list under the profile.
+
+- `river_tides.py --sandbox` builds it; the hosted site builds it with the other pages.
+- A guess tuned on a day's data can't count as a test on that day (`not_a_test_on`). Changing a guess means a new date on its row; git keeps the old value.
+- Guesses are not hypotheses. Claims tested against data set in advance stay in `docs/hypotheses.md`, and only they can ever reach the Predictions page.
 
 ## Limitations
 

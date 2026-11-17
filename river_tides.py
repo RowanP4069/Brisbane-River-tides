@@ -303,6 +303,97 @@ def build_payload(frames, pts, h, bar_msl, step_min, stations, full_bar, hours,
     }
 
 
+# --- Sandbox: the Guesswork page (--sandbox) -------------------------------------------
+# Above Kholo Creek the project makes no predictions (docs/hypotheses.md). The sandbox
+# page carries on to the old weir ruin with GUESSES, each named and dated in
+# data/guesses.csv, so they can be looked at and argued with. Nothing here changes the
+# model below Kholo, and the normal page is built without any of it.
+
+SANDBOX_END_FEATURE = "weir-ruin"             # the sandbox reach ends at the old weir ruin
+# Features labelled on the sandbox map and profile axis (feature_id -> short name), as
+# the MSQ stations are below Kholo.
+SANDBOX_LABELS = {"bridge-colleges-crossing": "Colleges Crossing", "weir-ruin": "Weir ruin"}
+# The sandbox page's <title>, and the tag that keeps it out of search engines.
+SANDBOX_TITLE = "Guesswork: Kholo Creek to the weir ruin"
+NOINDEX = '<meta name="robots" content="noindex">'
+
+
+def load_guesses(path):
+    """data/guesses.csv, one row per guess, indexed by id. not_a_test_on becomes a list
+    of dates (a guess tuned on a day's data can't count as a test on that day)."""
+    g = pd.read_csv(path, dtype={"not_a_test_on": str, "feature_id": str})
+    g["not_a_test_on"] = g.not_a_test_on.fillna("").map(lambda s: [d for d in s.split(";") if d])
+    g["feature_id"] = g.feature_id.fillna("")
+    for need in ["G-lag", "G-ratio", "G-datum"]:
+        if need not in set(g.id):
+            raise SystemExit(f"{path}: no row for {need}")
+    if g.id.duplicated().any():
+        raise SystemExit(f"{path}: duplicate ids {sorted(set(g.id[g.id.duplicated()]))}")
+    return g.set_index("id", drop=False)
+
+
+def apply_guess_lag_ratio(pts, guesses, from_km):
+    """Points above from_km (Kholo Creek) take G-lag and G-ratio. Their MSL stays at
+    Kholo Creek's (add_corrections holds the last station's value), so their heights
+    are on Kholo Creek's LAT."""
+    above = pts.chainage_km > from_km + 1e-9
+    pts.loc[above, "lag_min"] = float(guesses.loc["G-lag", "value"])
+    pts.loc[above, "ratio"] = float(guesses.loc["G-ratio", "value"])
+    return pts
+
+
+def sandbox_block(guesses, features, obs, from_km, to_km):
+    """What the template needs to draw the guess reach (DATA.sandbox).
+
+    floors: gravel-run crests (G-floor-*). Above a crest's km the guess height is the
+      larger of the tide and the crest; the page applies this after the model.
+    places: river features in the guess reach, for the Place list.
+    observations: the project's field observations above from_km, as dark markers.
+    """
+    fe = features.set_index("feature_id", drop=False)
+    rows = []
+    for g in guesses.itertuples():
+        km = g.km if pd.notna(g.km) else None
+        rows.append({"id": g.id, "dated": g.dated, "value": float(g.value),
+                     "unit": g.unit if pd.notna(g.unit) else "",
+                     "feature": fe.loc[g.feature_id, "name"] if g.feature_id else "",
+                     "km": km, "not_a_test_on": g.not_a_test_on, "basis": g.basis})
+    floors = [{"id": r["id"], "km": r["km"], "crest_m": r["value"], "name": r["feature"]}
+              for r in rows if r["id"].startswith("G-floor")]
+    if any(f["km"] is None for f in floors):
+        raise SystemExit("guesses.csv: every G-floor row needs a km")
+    places = []
+    for f in features.itertuples():
+        if from_km < f.km <= to_km and f.kind in ("gravel run", "structure", "gauge"):
+            pl = {"name": f.name, "chainage_km": round(float(f.km), 2)}
+            if f.feature_id in SANDBOX_LABELS:       # also labelled on the map and profile
+                pl.update(short=SANDBOX_LABELS[f.feature_id],
+                          lon=round(float(f.lon), 6), lat=round(float(f.lat), 6))
+            places.append(pl)
+    observations = []
+    for o in obs.itertuples():
+        k_from, k_to = float(o.km_from), float(o.km_to)
+        if k_to <= from_km:
+            continue
+        f = fe.loc[o.feature_id] if o.feature_id in fe.index else None
+        # A height only for the state of a level mark (covered or not): that says where
+        # the water was. A high-water time read at a gauge plate is not a height.
+        ahd = (f.height_m_ahd if o.quantity == "mark_state" and f is not None
+               and pd.notna(f.height_m_ahd) else None)
+        observations.append({
+            "id": o.obs_id, "from": o.time_from_aest.replace(" ", "T"),
+            "to": o.time_to_aest.replace(" ", "T"), "km": round((k_from + k_to) / 2, 2),
+            "quantity": o.quantity, "value": o.value, "confidence": o.confidence,
+            "feature": f["name"] if f is not None else "",
+            "height_m_ahd": float(ahd) if ahd is not None else None,
+        })
+    return {"from_km": from_km, "to_km": to_km,
+            "datum_ahd": float(guesses.loc["G-datum", "value"]),
+            "guesses": rows, "floors": sorted(floors, key=lambda f: f["km"]),
+            "places": sorted(places, key=lambda p: p["chainage_km"]),
+            "observations": sorted(observations, key=lambda o: (o["from"], o["km"]))}
+
+
 def write_html(payload, template_path, out_path):
     """Inline the payload into the page template and write a single self-contained file.
 
@@ -318,6 +409,14 @@ def write_html(payload, template_path, out_path):
         raise SystemExit(f"Template must contain {marker} exactly once: {template_path}")
     # "</" is escaped so a stray "</script>" inside the data can never close the script tag.
     data = to_json(payload).replace("</", "<\\/")
+    if "sandbox" in payload:
+        # Done here, not by the page's script, so a search engine that doesn't run
+        # JavaScript still sees them.
+        for old, new in [("<title>Brisbane River Tides</title>", f"<title>{SANDBOX_TITLE}</title>"),
+                         ('<meta charset="utf-8">', '<meta charset="utf-8">\n' + NOINDEX)]:
+            if html.count(old) != 1:
+                raise SystemExit(f"Template must contain {old} exactly once: {template_path}")
+            html = html.replace(old, new)
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     Path(out_path).write_text(html.replace(marker, data), encoding="utf-8")
 
@@ -352,8 +451,12 @@ def main():
                     help="distance between bars along the river, km (default: 0.5)")
     ap.add_argument("--ramps", default=str(DATA / "ramps.csv"),
                     help="boat ramps for the page's Place list (default: data/)")
-    ap.add_argument("--out", default=str(HERE / "output" / "index.html"),
-                    help="page to write (default: output/index.html, as on the website)")
+    ap.add_argument("--out",
+                    help="page to write (default: output/index.html, as on the website; "
+                         "output/guesswork.html with --sandbox)")
+    ap.add_argument("--sandbox", action="store_true",
+                    help="build the Guesswork page instead: the same model to Kholo Creek, "
+                         "then GUESSES from data/guesses.csv up to the old weir ruin")
     ap.add_argument("--template", default=str(HERE / "web" / "predictions_template.html"),
                     help="page template with the /*__DATA__*/null marker (default: web/)")
     ap.add_argument("--json", help="also write the page data to this JSON file")
@@ -388,8 +491,19 @@ def main():
                          f"{full.index[0]:%Y-%m-%d %H:%M} to {full.index[-1]:%Y-%m-%d %H:%M}. "
                          "Check --start, or add that year's CSV (fetch_bar.py --year YYYY).")
 
-    pts = sample_centreline(args.centreline, args.spacing_km, st.chainage_km.max())
+    kholo_km = float(st.chainage_km.max())
+    end_km = kholo_km
+    if args.sandbox:
+        features = pd.read_csv(DATA / "features.csv")
+        end_km = float(features.loc[features.feature_id == SANDBOX_END_FEATURE, "km"].iloc[0])
+        guesses = load_guesses(DATA / "guesses.csv")
+    if args.out is None:
+        args.out = str(HERE / "output" / ("guesswork.html" if args.sandbox else "index.html"))
+
+    pts = sample_centreline(args.centreline, args.spacing_km, end_km)
     pts = add_corrections(pts, st)
+    if args.sandbox:
+        pts = apply_guess_lag_ratio(pts, guesses, kholo_km)
     h = heights(bar, frames, pts, bar_msl)
 
     print(f"{len(frames)} frames x {len(pts)} points, "
@@ -401,6 +515,9 @@ def main():
                             station_labels(st, args.centreline), full, args.hours,
                             start_is_default, built,
                             ramp_places(args.ramps, pts.chainage_km.max()))
+    if args.sandbox:
+        obs = pd.read_csv(DATA / "observations.csv", dtype=str).fillna("")
+        payload["sandbox"] = sandbox_block(guesses, features, obs, kholo_km, end_km)
     write_html(payload, args.template, args.out)
     print("Wrote", args.out)
     if args.json:
