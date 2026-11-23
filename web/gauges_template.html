@@ -105,18 +105,24 @@
     to 3 hours means the level held. It reads nothing below 0.59 m AHD: a pale bar or hollow dot there means 0.59 m
     <i>or lower</i>. One-off telemetry glitches (a single reading 0.40 or 0.80 m out) are left out; freshwater
     after rain raises the whole level and stays in.</p>
-  <p><b>Goodna.</b> To see the river at Goodna, Ipswich City Council's flood camera at the Goodna boat ramp (km
-    61.6) is on the <a href="https://disaster.ipswich.qld.gov.au/viewCameras">Ipswich Disaster Dashboard</a>
-    (a still photo, on the council's site). The Bureau of Meteorology's Goodna gauge (540670, km 62.3)
-    isn't drawn here because its heights aren't on AHD; it is on the <a href="compare.html">Measured vs
-    predicted</a> page.</p>
+  <p><b>Goodna</b> (km 62.3) is the Bureau of Meteorology's flood gauge 540670, from the project's own copy of its
+    readings (collected every 15 minutes, which keeps only the latest reading each time), so it can lag a little and
+    misses some readings. It reads its own local gauge height, and BoM doesn't publish where that gauge's zero is.
+    In m AHD it is shown through an <b>estimated</b> zero of −0.30 m AHD (about ±0.1 m), from its high waters
+    compared with those measured at Moggill and Jindalee (the model's fit agrees, −0.32): hence "est." and the
+    dashed outline, and its tooltip gives the gauge's own reading too. "Minus window mean" doesn't depend on it. Like
+    Colleges Crossing it reports each 0.05 m change, so a quiet spell of up to 3 hours means the level held, and
+    one-off glitches are left out. To see the river there, Ipswich City Council's flood camera at the Goodna boat
+    ramp (km 61.6) is on the <a href="https://disaster.ipswich.qld.gov.au/viewCameras">Ipswich Disaster
+    Dashboard</a> (a still photo, on the council's site).</p>
   <p class="warn">Heights are metres <b>AHD</b> (Australian Height Datum, roughly mean sea level), one datum for
-    every gauge, so unlike the predictions these do form a real water surface. The predictions page uses each
-    place's own LAT instead, about 1.2 m lower at Port Office, so the numbers differ. Jindalee and Moggill have not
-    read below about 0 m AHD in the readings checked so far: their lowest tides may not be recorded in full.</p>
+    every gauge (Goodna's through an estimate, see above), so unlike the predictions these do form a real water
+    surface. The predictions page uses each place's own LAT instead, about 1.2 m lower at Port Office, so the
+    numbers differ. Jindalee and Moggill have not read below about 0 m AHD in the readings checked so far: their
+    lowest tides may not be recorded in full. Goodna, between them, does read through low water.</p>
   <p>Data: Telemetry sensors — Rainfall and Stream heights © Brisbane City Council, CC BY 4.0. Station names:
     Maritime Safety Queensland tidal planes © State of Queensland, CC BY 4.0. River centreline: Watercourse lines -
-    Queensland © State of Queensland (Department of Resources), CC BY 4.0. Colleges Crossing river heights ©
+    Queensland © State of Queensland (Department of Resources), CC BY 4.0. Goodna and Colleges Crossing river heights ©
     Commonwealth of Australia (Bureau of Meteorology), Creative Commons Attribution Australia licence. Basemap
     attribution on the map.</p>
   <p id="built" hidden></p>
@@ -145,6 +151,11 @@ const GAP_MAX_MS = 60 * MIN_MS;
 const gapMax = g => GAUGES[g].gap_max_min ? GAUGES[g].gap_max_min * MIN_MS : GAP_MAX_MS;
 // At or below a gauge's floor (Colleges Crossing: 0.59 m) the water may be lower still.
 const atFloor = (g, v) => GAUGES[g].floor_m != null && v <= GAUGES[g].floor_m + 1e-9;
+// Goodna: shown in m AHD through an ESTIMATED gauge zero (zero_ahd_est), so in the m AHD
+// view it is marked "est." (label, dashed dot). Relative to the window mean it is exact.
+const isEst = g => GAUGES[g].zero_ahd_est != null;
+const estShown = g => isEst(g) && state.base === "ahd";
+const shortLabel = G => G.zero_ahd_est != null && state.base === "ahd" ? G.short + " est." : G.short;
 // Rising/falling: the slope of a straight line fitted to the readings within RATE_FIT_MS
 // either side (at least RATE_MIN_N of them, spanning at least RATE_MIN_SPAN_MS). Readings
 // jitter by 1-4 cm near high and low water, and a change between just two points 30 min
@@ -189,20 +200,27 @@ async function fetchReadings() {
   return out;
 }
 
-// ---- BoM gauges (Colleges Crossing) ---------------------------------------------------
-// From the project's copy on the gauge-data branch: the hand-filled series plus the
-// 15-minute collection's files for this month and last (a 72 h window can cross a month
-// end). Times there are naive AEST, "YYYY-MM-DD HH:MM". A missing file is skipped.
+// ---- BoM gauges (Goodna, Colleges Crossing) -------------------------------------------
+// From the project's copy on the gauge-data branch: the hand-filled series (Colleges
+// Crossing only) plus the 15-minute collection's files for this month and last (a 72 h
+// window can cross a month end). Times there are naive AEST, "YYYY-MM-DD HH:MM". A missing
+// file is skipped. Goodna reads local gauge height: its estimated gauge zero (zero_ahd_est,
+// from build_gauges.py) is added, so every series on the page is m AHD.
 const aestMs = t => Date.parse(t.replace(" ", "T") + ":00+10:00");
+// Each file once per refresh, shared by the BoM gauges (bom/ holds them all; a month's
+// file is about 0.9 MB by its end). load() empties this before each refresh.
+let bomTexts = new Map();
+function bomText(url) {
+  if (!bomTexts.has(url)) bomTexts.set(url, fetch(url, { cache: "no-cache" }).then(r => r.ok ? r.text() : ""));
+  return bomTexts.get(url);
+}
 async function fetchBom(G) {
   const B = DATA.meta.bom, now = new Date(Date.now() + AEST_MS);
   const months = [0, 1].map(k => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - k, 1))
     .toISOString().slice(0, 7));
-  const paths = [B.filled.replace("{id}", G.id), ...months.map(m => B.monthly.replace("{month}", m))];
-  const texts = await Promise.all(paths.map(async p => {
-    const r = await fetch(B.base + p, { cache: "no-cache" });
-    return r.ok ? r.text() : "";
-  }));
+  const paths = [...(G.filled ? [B.filled.replace("{id}", G.id)] : []),
+    ...months.map(m => B.monthly.replace("{month}", m))];
+  const texts = await Promise.all(paths.map(p => bomText(B.base + p)));
   const rows = [];
   for (const text of texts) {
     for (const line of text.split("\n").slice(1)) {
@@ -210,11 +228,12 @@ async function fetchBom(G) {
       if (gauge === G.id && t && Number.isFinite(+v) && v !== "") rows.push([aestMs(t), +v]);
     }
   }
-  return cleanBom(rows);
+  const z = G.zero_ahd_est ?? 0;
+  return cleanBom(rows).map(([t, v]) => [t, Math.round((v + z) * 1000) / 1000]);
 }
 // BoM's series has one-off telemetry glitches: a single reading often 0.40 or 0.80 m out,
 // back to normal minutes later, usually in the same minute as a real reading. The same
-// rule as compare_gauges.py (guess_readings): where a minute has more than one value, keep
+// rule as compare_gauges.py (bom_clean): where a minute has more than one value, keep
 // the one nearest the readings in the minutes either side; then drop a lone reading
 // 0.25 m or more from the median of it and its 4 neighbours. Freshwater rises are
 // gradual, so they stay in.
@@ -414,7 +433,8 @@ const callouts = !map ? [] : GAUGES.map(s => {
   dot.setAttribute("stroke", "#fff"); dot.setAttribute("stroke-width", "1.5");
   leaderSvg.append(line, dot);
   const label = document.createElement("div");
-  label.textContent = s.short;
+  label.textContent = shortLabel(s);
+  if (s.zero_ahd_est != null) label.style.borderStyle = "dashed";
   label.style.cssText = "position:absolute;font:12px system-ui,sans-serif;color:#1d2329;background:rgba(255,255,255,.93);"
     + "border:1px solid rgba(29,35,41,.35);border-radius:3px;padding:1px 5px;white-space:nowrap";
   calloutLayer.appendChild(label);
@@ -485,7 +505,12 @@ if (map) {
 
 function tipText(f, g) {
   const v = H[f][g], r = rate[f][g], G = GAUGES[g];
-  const head = `${G.name}  (km ${G.chainage_km.toFixed(1)}, BoM ${G.bom}${G.source === "bom" ? ", above Kholo Creek" : ""})`;
+  const head = `${G.name}  (km ${G.chainage_km.toFixed(1)}, BoM ${G.bom}`
+    + `${G.chainage_km > DATA.meta.kholo_km ? ", above Kholo Creek" : ""})`;
+  // Goodna: the estimate, and what the gauge itself read.
+  const est = isEst(g) && Number.isFinite(v)
+    ? `\nestimated AHD (±0.1 m): gauge read ${(v - G.zero_ahd_est).toFixed(2)} m, estimated gauge zero `
+      + `${G.zero_ahd_est.toFixed(2)} m AHD` : "";
   if (!Number.isFinite(v)) {
     const s = series[g], last = s.length ? s[s.length - 1][0] : -Infinity;
     return `${head}\n` + (TIMES[f] > last
@@ -495,9 +520,10 @@ function tipText(f, g) {
   const s = series[g], last = s[s.length - 1][0];
   const held = G.gap_max_min && TIMES[f] > last ? ` (no change reported since ${fmtTime(last)})` : "";
   if (atFloor(g, v)) return `${head}\n${v.toFixed(2)} m AHD or lower: the gauge reads nothing below ${G.floor_m.toFixed(2)} m${held}`;
-  if (held) return `${head}\n${v.toFixed(2)} m AHD${held}`;
+  if (held) return `${head}\n${v.toFixed(2)} m AHD${held}${est}`;
   return `${head}\n${v.toFixed(2)} m AHD   ${(v - BASES.mean.mean[g]).toFixed(2)} m vs window mean\n`
-    + (Number.isFinite(r) ? `rate ${r >= 0 ? "+" : ""}${r.toFixed(2)} m/h` : "direction unknown: too few readings around this time");
+    + (Number.isFinite(r) ? `rate ${r >= 0 ? "+" : ""}${r.toFixed(2)} m/h` : "direction unknown: too few readings around this time")
+    + est;
 }
 
 // ---- Profile ------------------------------------------------------------------------
@@ -571,7 +597,9 @@ function drawProfile() {
       ctx.strokeStyle = "#1d2329"; ctx.lineWidth = 1.5; ctx.stroke();
     } else if (Number.isFinite(v)) {
       ctx.arc(x, Y(v), 5, 0, 2 * Math.PI); ctx.fillStyle = css(colourFn(f, g)); ctx.fill();
-      ctx.strokeStyle = "#1d2329"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.strokeStyle = "#1d2329"; ctx.lineWidth = 1;
+      if (estShown(g)) { ctx.setLineDash([2, 2]); ctx.lineWidth = 1.5; }   // estimated AHD
+      ctx.stroke(); ctx.setLineDash([]);
     } else {
       ctx.arc(x, Y(0), 5, 0, 2 * Math.PI); ctx.strokeStyle = "#9aa4ad"; ctx.lineWidth = 1.5; ctx.stroke();
     }
@@ -581,10 +609,10 @@ function drawProfile() {
   ctx.fillStyle = "#1d2329"; ctx.textAlign = "center";
   const rowEnd = [-Infinity, -Infinity];
   for (const G of [...GAUGES].reverse()) {          // left to right across the screen
-    const x = X(G.chainage_km), w = ctx.measureText(G.short).width;
+    const name = shortLabel(G), x = X(G.chainage_km), w = ctx.measureText(name).width;
     const row = rowEnd.findIndex(e => x - w / 2 > e + 4);
     if (row < 0) continue;
-    ctx.fillText(G.short, x, 12 + row * 13);
+    ctx.fillText(name, x, 12 + row * 13);
     rowEnd[row] = x + w / 2;
   }
   // x axis: km and MSQ station names, as on the predictions page
@@ -643,6 +671,7 @@ async function load() {
   $("refresh").disabled = true;
   try {
     const bomG = GAUGES.map((G, i) => [G, i]).filter(([G]) => G.source === "bom");
+    bomTexts = new Map();
     const [bcc, ...bom] = await Promise.all([fetchReadings(),
       ...bomG.map(([G]) => fetchBom(G).catch(err => { console.error(err); return null; }))]);
     bomG.forEach(([, i], k) => { bcc[i] = bom[k] || []; });
@@ -670,7 +699,11 @@ $("refresh").addEventListener("click", load);
 $("hours").addEventListener("change", e => { state.hours = +e.target.value; applyWindow(true); });
 slider.addEventListener("input", () => { state.frame = +slider.value; update(); });
 $("colour").addEventListener("change", e => { state.colour = e.target.value; renderLegend(); update(); });
-$("base").addEventListener("change", e => { state.base = e.target.value; update(); });
+$("base").addEventListener("change", e => {
+  state.base = e.target.value;
+  for (const c of callouts) { c.label.textContent = shortLabel(c.s); c.w = 0; }   // "est." only in m AHD
+  update();
+});
 $("exag").addEventListener("input", e => { state.exag = +e.target.value; update(); });
 
 // Playback: Speed values are frames (5 min each) per second; loops at the end.

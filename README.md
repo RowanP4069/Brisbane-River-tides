@@ -71,13 +71,14 @@ The main ones are below. `data/README.md` covers them in full, along with the da
 
 ## Gauges (measured)
 
-The **Gauges** page shows what the river actually did: the last 24, 48 or 72 hours of readings from Brisbane City Council's eight Brisbane River gauges, from Breakfast Creek to Moggill, and the Bureau of Meteorology's Colleges Crossing gauge (540063, km 83.8, above Kholo Creek).
+The **Gauges** page shows what the river actually did: the last 24, 48 or 72 hours of readings from Brisbane City Council's eight Brisbane River gauges, from Breakfast Creek to Moggill, and the Bureau of Meteorology's Goodna (540670, km 62.3) and Colleges Crossing (540063, km 83.8, above Kholo Creek) gauges.
 
 - The page fetches the council's readings **live** from its open data service when it opens (⟳ Refresh fetches again). Nothing is forecast.
-- Heights are **metres AHD**, one datum for every gauge, so unlike the predictions they form a real water surface. The predictions use each place's LAT, about 1.2 m lower at Port Office.
+- Heights are **metres AHD**, one datum for every gauge (Goodna's through an estimate, below), so unlike the predictions they form a real water surface. The predictions use each place's LAT, about 1.2 m lower at Port Office.
 - Readings arrive at irregular times. Gaps of up to an hour are bridged with a straight line; longer gaps, and gauges whose latest readings haven't arrived yet, show as *no reading*.
 - Rising, falling or near slack comes from a straight line fitted to the readings within 45 minutes either side (slack below 3 cm/h), because readings wobble by a centimetre or more near high and low water. A level with too few readings around it to tell its direction shows as *direction unknown*.
 - **Colleges Crossing** comes from the project's own copy of BoM's readings on the `gauge-data` branch (`bom/`, collected every 15 minutes, and `bom-filled/`, filled by hand from BoM's table), so it can lag a little; the page says when its latest reading is over an hour old. It reports only each 0.05 m change, so its last level is held for up to 3 hours. It reads nothing below 0.59 m AHD, shown as *at gauge floor* (0.59 m or lower). One-off telemetry glitches are left out, by the same rule as `compare_gauges.py`.
+- **Goodna** comes the same way, from `bom/` only (no hand-filled series), so it misses the readings between 15-minute collections. It reads its own local gauge height, and BoM publishes no gauge zero for it, so in m AHD it is shown through an **estimated** zero of −0.30 m AHD (about ±0.1 m), marked *est.* with a dashed outline. Two estimates agree: from Goodna's high waters against Moggill's and Jindalee's measured ones (−0.30), and through the model's fitted LAT (−0.32); `GOODNA_ZERO_AHD_EST` in `build_gauges.py` gives the working. *Minus window mean* doesn't depend on it. It reads through low water (no floor).
 - `build_gauges.py` builds it. `data/gauges.csv` holds each gauge's position along the river; `build_gauges.py --download` remakes it from the council's gauge list.
 
 ## Measured vs predicted
@@ -170,7 +171,7 @@ Everything the site needs is in this repository and its two data branches; no ke
 2. **Turn on Actions.** Forks start with workflows, and their schedules, turned off. Turn them on from the Actions tab. GitHub also turns off schedules in a public repository after 60 days with no activity.
 3. **Turn on Pages.** Settings → Pages → Source: GitHub Actions.
 4. **Use your own report form, or none.** `FORM` in `build_report.py` and `PUBLIC_CSV` in `collect_reports.py` point at this project's Google Form and sheet. Left as they are, reports sent from your copy's page land in this project's sheet. Either make your own form and sheet ([docs/report-form-setup.md](docs/report-form-setup.md)) and put in their addresses, or set the form's `action` to `""`: the page still works and gives its verdict, but says the report wasn't sent.
-5. **Point the remaining addresses at your copy.** `BOM_FILES` in `build_gauges.py` reads Colleges Crossing from this repository's `gauge-data` branch, and `web/results_template.html` links to this repository's `docs/hypotheses.md`.
+5. **Point the remaining addresses at your copy.** `BOM_FILES` in `build_gauges.py` reads Goodna and Colleges Crossing from this repository's `gauge-data` branch, and `web/results_template.html` links to this repository's `docs/hypotheses.md`.
 6. **Expect gaps in the BoM readings.** `collect-bom.yml` asks for a run every 15 minutes, but GitHub delays and skips frequent scheduled runs. For the hosted site, the same `collect_gauges.py --sources bom` command runs on a schedule outside GitHub.
 7. **Add each new year's Bar predictions** with `fetch_bar.py`. The committed files end on 31 December 2027, and the predictions page needs the next year before then.
 
