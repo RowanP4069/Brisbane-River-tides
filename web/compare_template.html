@@ -93,8 +93,9 @@
   <summary>How this works, and its limits</summary>
   <ul>
     <li><b>Predicted</b> is the same model as the predictions page, worked out at each gauge's place on the river.
-      <b>Measured</b> is what the gauges recorded: Brisbane City Council's river gauges (raw, unchecked) and Maritime
-      Safety Queensland's Brisbane Bar gauge, saved daily since early November 2026.</li>
+      <b>Measured</b> is what the gauges recorded: Brisbane City Council's river gauges (raw, unchecked), Maritime
+      Safety Queensland's Brisbane Bar gauge and two Bureau of Meteorology gauges (Goodna and Colleges Crossing),
+      saved since early November 2026.</li>
     <li><b>Datum.</b> The council gauges read metres AHD; the model gives metres above each place's own LAT. The gap
       between the two differs along the river, so it is <i>measured</i>: the average of measured minus predicted over
       all the readings. It's shown as "LAT below AHD" and stays the same whichever period you pick. Plots show the
@@ -112,6 +113,12 @@
     <li><b>Gauge floors.</b> The Jindalee and Moggill gauges go silent for hours around low water and come back at
       the same level, while the tide elsewhere keeps falling: most likely the sensor sits above low water and dries
       out. Readings near that level (the dashed line), and the low waters it hides, are left out.</li>
+    <li><b>Goodna</b> (Bureau of Meteorology gauge 540670, km 62.3, 0.6 km above MSQ's Goodna station) reads metres
+      on its own local gauge height (LGH). BoM doesn't publish where that gauge's zero is, so its "LAT below AHD" is
+      really LAT below the gauge's zero. Timing, range and residuals don't depend on it. It reads in 5 cm steps,
+      including below its zero at low water. Readings: the 15-minute collection from 17 Nov 2026, which keeps only
+      the latest reading each time, so fewer tides are timed than at the council gauges. BoM's one-off glitches are
+      left out as at Colleges Crossing.</li>
     <li><b>Colleges Crossing</b> (Bureau of Meteorology gauge 540063, km 83.8) is above Kholo Creek, where MSQ
       publishes no tide figures and the project makes no predictions. It is compared with the
       <a href="guesswork.html">Guesswork</a> page's guesses instead (G-lag, G-ratio), so its timing and fitted
@@ -131,7 +138,7 @@
     <a href="https://www.bom.gov.au/qld/flood/">Bureau of Meteorology</a>.</p>
   <p>Data: Telemetry sensors — Rainfall and Stream heights © Brisbane City Council, CC BY 4.0. Brisbane Bar tide
     gauge near real time data and tide predictions, tidal planes © State of Queensland (Maritime Safety Queensland),
-    CC BY 4.0. Colleges Crossing river heights © Commonwealth of Australia (Bureau of Meteorology), Creative
+    CC BY 4.0. Goodna and Colleges Crossing river heights © Commonwealth of Australia (Bureau of Meteorology), Creative
     Commons Attribution Australia licence.</p>
   <p id="built" hidden></p>
 </footer>
@@ -292,7 +299,7 @@ const COLS = [
   ["Step", "The gauge's reporting step: it sends a reading when the level has moved this much."],
   ["LAT below AHD", "How far this place's LAT (the model's zero) is below AHD (the gauge's zero), "
     + "measured from all the readings. At the Bar (both LAT): the average measured minus predicted in this "
-    + "period, i.e. the weather."],
+    + "period, i.e. the weather. Goodna: below the gauge's own zero (LGH), which BoM doesn't tie to AHD."],
   ["RMS", "Typical size of the residual (measured − predicted), metres."],
   ["95%", "95% of residuals in this period were smaller than this, metres."],
   ["HW timing", "Measured minus predicted time of high water, minutes: average ± spread (number of tides). "
@@ -319,7 +326,7 @@ function render() {
     const s = windowStats(g, a, b);
     const timing = (m, sdv, n) => n ? `${f(m, 0, true)} ± ${sdv === null ? "–" : sdv.toFixed(0)} (${n})` : "–";
     const datum = g.datum === "LAT" ? `${f(s.bar_mean_resid_m, 2, true)} weather`
-      : f(-g.offset_m, 2) + (g.guess ? ` <span class="gtag">(G-datum ${f(g.guess_lat_below_ahd_m, 2)})</span>` : "");
+      : f(-g.offset_m, 2) + (g.datum === "LGH" ? ' <span class="lab">below gauge zero</span>' : "") + (g.guess ? ` <span class="gtag">(G-datum ${f(g.guess_lat_below_ahd_m, 2)})</span>` : "");
     const lag2 = (x, y) => `${f(x, 0)} / ${f(y, 0)}`;
     html += `<tr><td>${g.short} <span class="lab">${g.km.toFixed(1)} km</span>${g.guess ? ' <span class="gtag">guess</span>' : ""}</td>`
       + `<td>${s.readings}</td><td>${g.step_cm < 1 ? "<1" : g.step_cm.toFixed(0)} cm</td>`
@@ -335,7 +342,7 @@ function render() {
   }
   $("table").innerHTML = html + "</tbody>";
   const floors = DATA.gauges.filter(g => g.floor_m !== null)
-    .map(g => `${g.short} (about ${g.floor_m.toFixed(2)} m AHD)`);
+    .map(g => `${g.short} (about ${g.floor_m.toFixed(2)} m ${g.datum})`);
   $("tableNote").textContent = (floors.length ? `* Seems unable to read below a level: ${floors.join(", ")}; `
     + "low waters there aren't counted. " : "") + "Grey timings rest on fewer than 3 tides.";
   $("plots").innerHTML = DATA.gauges.map(g => plotHtml(g, a, b)).join("");

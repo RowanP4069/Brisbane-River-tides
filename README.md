@@ -95,6 +95,8 @@ The **Measured vs predicted** page compares what the river did with the predicti
 
 Colleges Crossing is on the page too, above Kholo Creek where there are no predictions, so it is compared with the [Guesswork](#guesswork-kholo-creek-to-the-weir-ruin) page's guesses and labelled as such: its timing tests G-lag, and its fitted "LAT below AHD" sits beside G-datum. BoM's series has one-off telemetry glitches (a single reading 0.40 or 0.80 m out, often in the same minute as a real one); `compare_gauges.py` drops those, but not freshwater after rain, which raises the whole level for hours or days and shows in the residuals.
 
+BoM's Goodna gauge (540670, km 62.3) is compared with the model like the council gauges. It reads metres on its own local gauge height, and BoM doesn't publish where that gauge's zero is, so its fitted offset is LAT below the gauge's zero rather than below AHD; timing, range and residuals don't depend on it. Its position (km 62.3) is from BoM's index of Queensland river height stations (*Queensland Flood Warning Networks*, Section 3). It has only the 15-minute collection behind it, so fewer of its tides are timed.
+
 ## Report the flow
 
 The **Report the flow** page lets people on the river report which way the water was moving, how strongly, and how the water looked. Reports are taken from the mouth up to the old weir ruin below Mt Crosby (km 87.4), where the tide stops. When a report is sent below Kholo Creek, the page compares it with the model at that place and time (rising level: water coming in; falling: going out; within 45 minutes of high or low water: turning) and says whether it matches. A mismatch is useful data: the current turns later than the level, and freshwater flow pushes it downstream.

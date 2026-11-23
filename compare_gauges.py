@@ -12,12 +12,14 @@ floors, and the timing and height of each high and low water. The page only pick
 the readings and events in the chosen period and averages them (the Stats block in
 web/compare_template.html; check_parity.py checks it matches this script's summary).
 
-Gauges: the MSQ Brisbane Bar gauge (metres above LAT) and Brisbane City Council's
-eight river gauges (metres AHD, positions from data/gauges.csv). The model is
-applied at each gauge's chainage exactly as on the predictions page.
+Gauges: the MSQ Brisbane Bar gauge (metres above LAT), Brisbane City Council's
+eight river gauges (metres AHD, positions from data/gauges.csv) and BoM's Goodna
+gauge 540670 (metres on its own local gauge height, LGH, whose zero BoM doesn't
+publish). The model is applied at each gauge's chainage exactly as on the
+predictions page.
 
 Datum: council gauges read AHD, the model gives local LAT, and the gap between the
-two differs along the river. So for each council gauge the script FITS the offset
+two differs along the river. So for each council gauge (and Goodna) the script FITS the offset
 (the mean of measured minus predicted) and reports it, rather than assuming one.
 That offset also absorbs any average weather or freshwater effect over the period;
 the Bar row (same datum both sides, offset not fitted) shows how big that is.
@@ -101,11 +103,20 @@ GUESS_GAUGE = "540063"
 GUESS_FEATURE = "gauge-colleges-crossing"   # its km, from data/features.csv
 # BoM's series has one-off telemetry glitches: a single reading often 0.40 or 0.80 m out
 # (8 or 16 of the gauge's 0.05 m steps), back to normal minutes later, usually in the
-# same minute as a real reading (see guess_readings). A lone reading this far from the
+# same minute as a real reading (see bom_clean). A lone reading this far from the
 # median of it and its 4 neighbours is dropped too. Freshwater rises are gradual (step
 # by step), so they stay in.
 SPIKE_M = 0.25
 GUESS_FLOOR_M = 0.59  # 540063 reads nothing below this (data/features.csv, from BoM)
+
+# Goodna (BoM 540670), compared with the model like the council gauges. BoM's index of
+# Queensland river height stations (flood warning networks, section 3) puts it at
+# 27 36 01 S, 152 53 39 E: on the river 75 m from the centreline at km 62.3, 0.6 km
+# above MSQ's Goodna station (km 61.7). Section 6 gives no gauge zero for it, so its
+# readings are LGH on an unknown datum: the fitted offset says where LAT lies below the
+# gauge's zero, not below AHD. Collected from the FTP bulletin only (bom/), every 15 min.
+BOM_GAUGES = [{"sensor_id": "540670", "short": "Goodna", "name": "Goodna (BoM 540670)",
+               "chainage_km": 62.30, "datum": "LGH"}]
 
 
 # --- Inputs ----------------------------------------------------------------------
@@ -139,6 +150,11 @@ def gauge_list(stations):
     for col in ["lag_hw_min", "lag_lw_min"]:
         g[col] = np.interp(g.chainage_km, stations.chainage_km, stations[col])
     g["datum"] = np.where(g.sensor_id == BAR_GAUGE, "LAT", "AHD")
+    b = pd.DataFrame(BOM_GAUGES)
+    add_corrections(b, stations)
+    for col in ["lag_hw_min", "lag_lw_min"]:
+        b[col] = np.interp(b.chainage_km, stations.chainage_km, stations[col])
+    g = pd.concat([g, b], ignore_index=True).sort_values("chainage_km", kind="stable")
     g["guess"] = False
     return pd.concat([g, pd.DataFrame([guess_gauge(stations)])], ignore_index=True)
 
@@ -163,12 +179,18 @@ def guess_gauge(stations):
             "guess_lat_below_ahd_m": -float(gs.loc["G-datum", "value"])}
 
 
-def guess_readings(ref):
-    """540063 readings: the full web-table series (bom-filled/) plus the FTP collection
-    (bom/), the same reading from both kept once, with glitches dropped (SPIKE_M)."""
-    parts = [read_branch(ref, f) for f in ("bom-filled", "bom")]
-    r = pd.concat(parts)
-    r = r[r.gauge == GUESS_GAUGE].dropna(subset=["value_m"]).drop_duplicates(subset=["time", "value_m"])
+def bom_readings(ref):
+    """Readings of the BoM gauges used here (540063 and BOM_GAUGES), each cleaned by
+    bom_clean. 540063 also has the full web-table series (bom-filled/)."""
+    parts = pd.concat([read_branch(ref, f) for f in ("bom-filled", "bom")])
+    ids = [GUESS_GAUGE] + [b["sensor_id"] for b in BOM_GAUGES]
+    return pd.concat([bom_clean(parts[parts.gauge == gid], gid) for gid in ids])
+
+
+def bom_clean(r, gid):
+    """One BoM gauge's readings, the same reading from bom-filled/ and bom/ kept once,
+    with glitches dropped (SPIKE_M)."""
+    r = r.dropna(subset=["value_m"]).drop_duplicates(subset=["time", "value_m"])
     r = r.sort_values("time", kind="stable").reset_index(drop=True)
     n0 = len(r)
     # 1. Most glitches share their minute with a real reading (e.g. 0.99 and 1.79 at
@@ -189,7 +211,7 @@ def guess_readings(ref):
     # 2. A remaining single reading far from its neighbours (SPIKE_M).
     med = r.value_m.rolling(5, center=True, min_periods=1).median()
     spike = (r.value_m - med).abs() >= SPIKE_M
-    print(f"{GUESS_GAUGE}: {n0} readings; {n0 - len(r)} glitches sharing a minute and "
+    print(f"{gid}: {n0} readings; {n0 - len(r)} glitches sharing a minute and "
           f"{spike.sum()} lone spikes dropped")
     return r[~spike][["gauge", "value_m", "time"]]
 
@@ -365,6 +387,7 @@ def analyse(row, readings, bar, bar_msl):
         "datum": row.datum, "readings": len(r),
         "first": f"{times[0]:%Y-%m-%d %H:%M}", "last": f"{times[-1]:%Y-%m-%d %H:%M}",
         # For AHD gauges: how far LAT (as the model uses it there) lies below AHD.
+        # For LGH (Goodna): how far it lies below the gauge's own zero.
         "lat_below_ahd_m": -offset if fit else np.nan,
         "bar_mean_resid_m": float(np.mean(meas - pred)) if not fit else np.nan,
         "floor_m": floor if floor is not None else np.nan,
@@ -441,7 +464,7 @@ def print_summary(s):
           f"{'HW dt (n)':>12} {'LW dt (n)':>12} {'HW dh':>6} {'LW dh':>6} "
           f"{'range':>10}  {'lag: model':>10} {'pub HW/LW':>9} {'meas HW/LW':>10}")
     for _, r in s.iterrows():
-        datum = (fmt(r.lat_below_ahd_m, ".2f") if r.datum == "AHD"
+        datum = (fmt(r.lat_below_ahd_m, ".2f") + ("g" if r.datum == "LGH" else "") if r.datum != "LAT"
                  else f"({fmt(r.bar_mean_resid_m, '+.2f')})")
         if not np.isnan(r.floor_m):
             datum += "*"
@@ -453,12 +476,12 @@ def print_summary(s):
               f"{fmt(r.range_ratio, '5.2f'):>5} ({r.n_range:2d})  "
               f"{r.model_lag_min:10.0f} {r.pub_hw_lag_min:4.0f}/{r.pub_lw_lag_min:<4.0f} "
               f"{fmt(r.meas_hw_lag_min, '5.0f'):>5}/{fmt(r.meas_lw_lag_min, '<4.0f')}")
-    print("\nLAT-AHD: fitted, metres LAT lies below AHD (Bar: mean measured - predicted, "
-          "i.e. weather).\ndt: measured minus predicted time, minutes (+ = later). "
+    print("\nLAT-AHD: fitted, metres LAT lies below AHD (g: below the gauge's own zero, LGH; "
+          "Bar: mean measured - predicted, i.e. weather).\ndt: measured minus predicted time, minutes (+ = later). "
           "dh: height error at HW/LW, m.\nrange: measured / predicted range of each rise "
           "or fall. Lags in minutes after the Bar.")
     for _, r in s[s.floor_m.notna()].iterrows():
-        print(f"* {r.short}: reads no lower than about {r.floor_m:.2f} m AHD (sensor dry at "
+        print(f"* {r.short}: reads no lower than about {r.floor_m:.2f} m {r.datum} (sensor dry at "
               f"low water?); readings near it and the low waters below it are left out.")
 
 
@@ -514,7 +537,7 @@ def main():
     # and matches the council gauges' 5-minute slots.
     bar_readings = bar_readings[bar_readings.time.dt.minute % 5 == 0]
     readings = pd.concat([read_branch(args.ref, "bcc"), bar_readings,
-                          guess_readings(args.ref)])
+                          bom_readings(args.ref)])
     if args.since:
         readings = readings[readings.time >= pd.Timestamp(args.since)]
     if args.until:
