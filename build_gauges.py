@@ -3,8 +3,9 @@
 
 The page shows what the river actually did: the latest readings (up to 72 hours) of
 Brisbane City Council's eight Brisbane River gauges, fetched live by the page itself
-from the council's open data API, and BoM's Goodna (540670) and Colleges Crossing
-(540063) gauges, fetched from the project's own copy on the gauge-data branch. No forecasting: predictions are
+from the council's open data API, and MSQ's Brisbane Bar gauge and BoM's Goodna (540670)
+and Colleges Crossing (540063) gauges, fetched from the project's own copy on the
+gauge-data branch. No forecasting: predictions are
 the other page.
 
 What this script puts in the page: the gauge list with each gauge's position along the
@@ -33,7 +34,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from collect_gauges import BCC_GAUGES, USER_AGENT
+from build_centreline import GAUGE_LAT, GAUGE_LON
+from collect_gauges import BCC_GAUGES, MSQ_BAR_GAUGE, USER_AGENT
 from river_tides import BRISBANE, load_stations, station_labels, to_json
 
 HERE = Path(__file__).parent
@@ -103,6 +105,14 @@ def download_gauges():
     print("Wrote", GAUGES_CSV)
 
 
+# Brisbane Bar: MSQ's gauge reads metres above LAT. LAT there is 1.238 m below AHD, from
+# survey marks, not fitted: PSM 88814 (Whyte Island) is 4.622 m above LAT (MSQ tidal
+# planes 2026 and 2027) and 3.384 m AHD (Queensland survey control register, AHD
+# lineage "Datum", Class C; looked up 2026-11-23). The same check at Port Office (PSM
+# 130588: 6.518 above LAT, 5.289 AHD, so 1.229) matches the 1.22 m measured there from
+# the council's gauge (docs/data-sources.md).
+BAR_LAT_BELOW_AHD = 1.238
+
 # Goodna's gauge zero in m AHD, ESTIMATED (2026-11-23): BoM publishes none for 540670.
 # Two estimates agree:
 #  - from measured high waters (no model): Moggill's (km 66.8) are 0.26 m and Jindalee's
@@ -114,13 +124,21 @@ def download_gauges():
 # Good to about +-0.1 m. Replace with BoM's figure if it is ever published.
 GOODNA_ZERO_AHD_EST = -0.30
 
-# BoM gauges. Not in the council's data: their readings are BoM's, saved on the
-# gauge-data branch (bom/ by the 15-minute collection; for Colleges Crossing also
-# bom-filled/, read by hand from BoM's web table), which the page fetches from GitHub
-# (raw.githubusercontent.com allows that from any page). Both report only each 0.05 m
-# change, plus a reading about every 3 hours when the level holds, so a quiet spell of up
-# to 3 hours means "no change", not "no reading" (gap_max_min).
-BOM_GAUGES = [
+# Gauges read from the project's own copy on the gauge-data branch, not live: MSQ's
+# Brisbane Bar (msq_bar/, whose live feed pages can't read: no CORS header) and BoM's
+# Goodna and Colleges Crossing (bom/ by the 15-minute collection; for Colleges Crossing
+# also bom-filled/, read by hand from BoM's web table). The page fetches them from GitHub
+# (raw.githubusercontent.com allows that from any page). The two BoM gauges report only
+# each 0.05 m change, plus a reading about every 3 hours when the level holds, so a quiet
+# spell of up to 3 hours means "no change", not "no reading" (gap_max_min).
+COPY_GAUGES = [
+    # Brisbane Bar (km 0, end of the Whyte Island jetty): MSQ's near-real-time readings,
+    # every minute, collected every 15 min (msq_bar/); the page keeps every 5th minute.
+    # Its zero (LAT) is BAR_LAT_BELOW_AHD below AHD: surveyed, not estimated.
+    {"id": MSQ_BAR_GAUGE, "bom": MSQ_BAR_GAUGE, "agency": "MSQ", "name": "Brisbane Bar (Whyte Island)",
+     "short": "Bar", "lon": GAUGE_LON, "lat": GAUGE_LAT, "chainage_km": 0.0,
+     "monthly": "msq_bar/{month}.csv", "filled": False, "every_min": 5,
+     "zero_ahd": -BAR_LAT_BELOW_AHD},
     # Goodna (km 62.3): local gauge height; the page adds zero_ahd_est to show it in
     # (estimated) m AHD, and marks it as estimated.
     {"id": "540670", "bom": "540670", "name": "Brisbane River at Goodna",
@@ -136,14 +154,16 @@ BOM_FILES = "https://raw.githubusercontent.com/RowanP4069/Brisbane-River-tides/g
 KM_SHOWN = 85.0               # the page shows the river to here (past Colleges Crossing)
 
 
-def bom_gauges():
+def copy_gauges():
     """The BoM gauges' entries for the page, placed from data/features.csv."""
     fe = pd.read_csv(DATA / "features.csv").set_index("feature_id")
     out = []
-    for b in BOM_GAUGES:
-        f = fe.loc[b["feature_id"]]
+    for b in COPY_GAUGES:
         g = {k: v for k, v in b.items() if k != "feature_id"}
-        g.update(lon=float(f.lon), lat=float(f.lat), chainage_km=float(f.km), source="bom")
+        g["source"] = "copy"            # from the project's copy on gauge-data
+        if "feature_id" in b:
+            f = fe.loc[b["feature_id"]]
+            g.update(lon=float(f.lon), lat=float(f.lat), chainage_km=float(f.km))
         out.append(g)
     return out
 
@@ -174,7 +194,7 @@ def build_payload(built=None):
         # Downstream to upstream (the profile joins neighbours in this order).
         "gauges": sorted([{"id": r.sensor_id, "bom": r.bom_no, "name": r["name"], "short": r.short,
                            "lon": r.lon, "lat": r.lat, "chainage_km": r.chainage_km, "source": "bcc"}
-                          for _, r in g.iterrows()] + bom_gauges(),
+                          for _, r in g.iterrows()] + copy_gauges(),
                          key=lambda x: x["chainage_km"]),
         "stations": station_labels(st, DATA / "centreline.csv"),
         "river": {"lon": river.lon.round(5).tolist(), "lat": river.lat.round(5).tolist()},

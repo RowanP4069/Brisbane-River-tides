@@ -127,13 +127,28 @@ Last 72 hours (5–8 Nov 2026): council gauge E1855 (AHD) compared with MSQ's of
   - Kholo PSM 32752
 - **The cross-check:** the mean of predicted minus measured over a few weeks, as above. If the two disagree by more than a few centimetres, find out why.
 
+**Answered 2026-11-23.** The AHD heights come from Queensland's survey control register, an open ArcGIS service (`https://spatial-gis.information.qld.gov.au/arcgis/rest/services/Location/SurveyControl/MapServer`, layer 17 "AHD Datum" or 18 "AHD Derived by Other"; field `ahdheight`; `mrk_id` is text, so quote it in a query). © State of Queensland (Department of Resources), CC BY 4.0. Heights above LAT are from MSQ's 2026 and 2027 tidal planes (identical).
+
+| Place | PSM | above LAT (MSQ) | AHD (register) | AHD lineage, class | LAT below AHD |
+|---|---|---|---|---|---|
+| Brisbane Bar | 88814 | 4.622 | 3.384 | Datum, Class C | **1.238** |
+| Pinkenba | 7632 | 2.893 | 1.660 | Datum, Class C | 1.233 |
+| Port Office | 130588 | 6.518 | 5.289 | Datum, Class C | 1.229 |
+| Goodna | 30537 | 12.365 | 11.296 | Derived, no class | 1.069 |
+| Moggill | 54705 | 6.735 | 5.645 | Datum, Class C | 1.090 |
+| Kholo Creek | 32752 | 12.489 | 11.545 | Datum, Class C | 0.944 |
+
+- Port Office agrees with the measured 1.22 m above, and Goodna with `compare_gauges.py`'s fits (about 1.06), so the method checks out.
+- The gauges page uses the Bar's figure (`BAR_LAT_BELOW_AHD` in `build_gauges.py`) to show the Bar in m AHD.
+- Kholo Creek's 0.944 is a survey figure for the Guesswork page's G-datum (guessed 1.10; Colleges Crossing's gauge suggests about 0.74). Not applied: that revision is on hold until discussed.
+
 ## Browser access (for live pages)
 
 | Source | Page can fetch directly? |
 |---|---|
 | data.qld.gov.au datastore (predictions, MSQ archives) | Yes |
 | Brisbane City Council telemetry | Yes |
-| MSQ Bar near-real-time file | No (needs a server-side step) |
+| MSQ Bar near-real-time file | No (needs a server-side step; the gauges page reads the project's copy on `gauge-data`) |
 | WMIP | No (needs a server-side step) |
 
 ## Recommendations
@@ -149,7 +164,7 @@ Last 72 hours (5–8 Nov 2026): council gauge E1855 (AHD) compared with MSQ's of
 
 - Do Jindalee and Moggill read the low tide, or does the sensor sit above it?
 - Why does the 2027 Bar resource have 72,620 rows?
-- What are the exact AHD heights of the PSMs (Queensland Globe)?
+- ~~What are the exact AHD heights of the PSMs (Queensland Globe)?~~ Answered 2026-11-23: see Datum above.
 - What do WMIP 1430912 (St Lucia) and 1430126 (Murarrie) measure?
 - What source is there for Seqwater dam releases and the tributary gauges?
 

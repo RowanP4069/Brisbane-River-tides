@@ -49,7 +49,7 @@
 <body>
 <header>
   <nav class="pages"><a href="index.html">Height predictions</a><a href="gauges.html" aria-current="page">Gauges (measured)</a><a href="compare.html">Measured vs predicted</a><a href="report.html">Report the flow</a><a href="results.html">Report the flow (results)</a><a href="guesswork.html" title="Guesswork: Kholo Creek to the weir ruin (sandbox)">Guesses</a></nav>
-  <h1>Brisbane River gauges: measured water height, Breakfast Creek to Colleges Crossing</h1>
+  <h1>Brisbane River gauges: measured water height, Brisbane Bar to Colleges Crossing</h1>
   <span class="sub">Height, not flow direction: the flow keeps running for a while after the level turns.</span>
   <span class="sub" id="subtitle">Loading the latest readings…</span>
   <span class="sub" id="status"></span>
@@ -99,6 +99,11 @@
     few cm); longer gaps, and gauges that haven't caught up yet, show as <i>no reading</i>. Nothing here is a forecast:
     for predicted tides use the <a href="index.html">Height predictions</a> page. <b>Not a flood warning service</b>:
     for warnings see the <a href="https://www.bom.gov.au/qld/flood/">Bureau of Meteorology</a>.</p>
+  <p><b>Brisbane Bar</b> (km 0, the end of the Whyte Island jetty) is Maritime Safety Queensland's tide gauge.
+    MSQ's live feed can't be read by other websites' pages, so it comes from the project's own copy of its readings
+    (collected every 15 minutes) and can lag a little; every 5th minute's reading is shown. It reads metres above
+    LAT, which is 1.24 m below AHD there: from survey marks (PSM 88814's height above LAT in MSQ's tidal planes and
+    its AHD height in Queensland's survey control register), not estimated.</p>
   <p><b>Colleges Crossing</b> (km 83.8, above Kholo Creek, where MSQ's tide figures end) is the Bureau of
     Meteorology's flood gauge 540063, from the project's own copy of its readings (collected every 15 minutes, gaps
     filled by hand from BoM's table), so it can lag a little. It reports each 0.05 m change, so a quiet spell of up
@@ -123,7 +128,9 @@
   <p>Data: Telemetry sensors — Rainfall and Stream heights © Brisbane City Council, CC BY 4.0. Station names:
     Maritime Safety Queensland tidal planes © State of Queensland, CC BY 4.0. River centreline: Watercourse lines -
     Queensland © State of Queensland (Department of Resources), CC BY 4.0. Goodna and Colleges Crossing river heights ©
-    Commonwealth of Australia (Bureau of Meteorology), Creative Commons Attribution Australia licence. Basemap
+    Commonwealth of Australia (Bureau of Meteorology), Creative Commons Attribution Australia licence. Brisbane Bar
+    tide gauge near real time data, tidal planes © State of Queensland (Maritime Safety Queensland), CC BY 4.0. Survey
+    control (AHD heights of marks) © State of Queensland (Department of Resources), CC BY 4.0. Basemap
     attribution on the map.</p>
   <p id="built" hidden></p>
 </footer>
@@ -200,14 +207,16 @@ async function fetchReadings() {
   return out;
 }
 
-// ---- BoM gauges (Goodna, Colleges Crossing) -------------------------------------------
-// From the project's copy on the gauge-data branch: the hand-filled series (Colleges
-// Crossing only) plus the 15-minute collection's files for this month and last (a 72 h
-// window can cross a month end). Times there are naive AEST, "YYYY-MM-DD HH:MM". A missing
-// file is skipped. Goodna reads local gauge height: its estimated gauge zero (zero_ahd_est,
-// from build_gauges.py) is added, so every series on the page is m AHD.
+// ---- Gauges from the project's copy (Bar, Goodna, Colleges Crossing) -------------------
+// From the gauge-data branch: the hand-filled series (Colleges Crossing only) plus the
+// 15-minute collection's files for this month and last (a 72 h window can cross a month
+// end): bom/ for BoM's gauges, msq_bar/ for the Bar (G.monthly). Times there are naive
+// AEST, "YYYY-MM-DD HH:MM". A missing file is skipped. The Bar reads every minute: only
+// every G.every_min-th minute is kept. Each gauge's zero in m AHD is added (zero_ahd: the
+// Bar's LAT, from survey marks; zero_ahd_est: Goodna's, estimated), so every series on the
+// page is m AHD.
 const aestMs = t => Date.parse(t.replace(" ", "T") + ":00+10:00");
-// Each file once per refresh, shared by the BoM gauges (bom/ holds them all; a month's
+// Each file once per refresh, shared by the gauges that read it (bom/ holds them all; a month's
 // file is about 0.9 MB by its end). load() empties this before each refresh.
 let bomTexts = new Map();
 function bomText(url) {
@@ -219,16 +228,17 @@ async function fetchBom(G) {
   const months = [0, 1].map(k => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - k, 1))
     .toISOString().slice(0, 7));
   const paths = [...(G.filled ? [B.filled.replace("{id}", G.id)] : []),
-    ...months.map(m => B.monthly.replace("{month}", m))];
+    ...months.map(m => (G.monthly || B.monthly).replace("{month}", m))];
   const texts = await Promise.all(paths.map(p => bomText(B.base + p)));
   const rows = [];
   for (const text of texts) {
     for (const line of text.split("\n").slice(1)) {
       const [t, gauge, v] = line.split(",");
-      if (gauge === G.id && t && Number.isFinite(+v) && v !== "") rows.push([aestMs(t), +v]);
+      if (gauge === G.id && t && Number.isFinite(+v) && v !== ""
+          && (!G.every_min || +t.slice(14, 16) % G.every_min === 0)) rows.push([aestMs(t), +v]);
     }
   }
-  const z = G.zero_ahd_est ?? 0;
+  const z = G.zero_ahd ?? G.zero_ahd_est ?? 0;
   return cleanBom(rows).map(([t, v]) => [t, Math.round((v + z) * 1000) / 1000]);
 }
 // BoM's series has one-off telemetry glitches: a single reading often 0.40 or 0.80 m out,
@@ -405,10 +415,11 @@ function showNoMap(err) {
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 let map = null;
 try {
-  // Opening view picked by eye to frame Breakfast Creek -> Colleges Crossing.
+  // Opening view to frame the Bar -> Colleges Crossing (152.80-153.16 E): worked out from
+  // the extent, not checked by eye (no WebGL in the test browser).
   map = new maplibregl.Map({
     container: "map", style: MAP_STYLE,
-    center: [152.93, -27.53], zoom: 10.6, pitch: 55, bearing: -15, maxPitch: 75,
+    center: [152.98, -27.50], zoom: 10.3, pitch: 55, bearing: -15, maxPitch: 75,
   });
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
 } catch (err) {
@@ -505,12 +516,14 @@ if (map) {
 
 function tipText(f, g) {
   const v = H[f][g], r = rate[f][g], G = GAUGES[g];
-  const head = `${G.name}  (km ${G.chainage_km.toFixed(1)}, BoM ${G.bom}`
+  const head = `${G.name}  (km ${G.chainage_km.toFixed(1)}, ${G.agency || "BoM"} ${G.bom}`
     + `${G.chainage_km > DATA.meta.kholo_km ? ", above Kholo Creek" : ""})`;
-  // Goodna: the estimate, and what the gauge itself read.
-  const est = isEst(g) && Number.isFinite(v)
-    ? `\nestimated AHD (±0.1 m): gauge read ${(v - G.zero_ahd_est).toFixed(2)} m, estimated gauge zero `
-      + `${G.zero_ahd_est.toFixed(2)} m AHD` : "";
+  // Goodna: the estimate, and what the gauge itself read. The Bar: its own LAT reading.
+  const est = !Number.isFinite(v) ? ""
+    : isEst(g) ? `\nestimated AHD (±0.1 m): gauge read ${(v - G.zero_ahd_est).toFixed(2)} m, estimated gauge zero `
+      + `${G.zero_ahd_est.toFixed(2)} m AHD`
+    : G.zero_ahd != null ? `\ngauge read ${(v - G.zero_ahd).toFixed(2)} m above LAT; LAT is `
+      + `${(-G.zero_ahd).toFixed(2)} m below AHD here (survey marks)` : "";
   if (!Number.isFinite(v)) {
     const s = series[g], last = s.length ? s[s.length - 1][0] : -Infinity;
     return `${head}\n` + (TIMES[f] > last
@@ -670,14 +683,14 @@ async function load() {
   $("status").textContent = "Fetching…"; $("status").className = "sub";
   $("refresh").disabled = true;
   try {
-    const bomG = GAUGES.map((G, i) => [G, i]).filter(([G]) => G.source === "bom");
+    const bomG = GAUGES.map((G, i) => [G, i]).filter(([G]) => G.source === "copy");
     bomTexts = new Map();
     const [bcc, ...bom] = await Promise.all([fetchReadings(),
       ...bomG.map(([G]) => fetchBom(G).catch(err => { console.error(err); return null; }))]);
     bomG.forEach(([, i], k) => { bcc[i] = bom[k] || []; });
     series = bcc;
     fetchedAt = Date.now();
-    // BoM's readings come via the project's collection, so say how fresh they are.
+    // These come via the project's collection, so say how fresh they are.
     const notes = bomG.map(([G, i], k) => {
       if (bom[k] === null) return `${G.short}: couldn't fetch its readings`;
       const s = series[i];
