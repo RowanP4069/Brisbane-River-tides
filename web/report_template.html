@@ -77,7 +77,7 @@
     <button type="button" id="locate">📍 Use my location</button>
     <span class="muted" id="mapHint">or tap the river on the map (yellow dots are boat ramps)</span>
   </div>
-  <div class="row"><label class="muted">Near a boat ramp?
+  <div class="row"><label class="muted">Near a boat ramp or a club?
     <select id="rampIn"><option value="">choose…</option></select></label></div>
   <div class="row" id="noMap">
     <span class="muted">The map couldn't start in this browser. Use your location, or give the place as distance
@@ -354,14 +354,17 @@ function useKm() {                   // the no-map fallback
 for (const rv of RIVERS) $("riverIn").add(new Option(rv.name, rv.id));
 $("kmIn").addEventListener("input", useKm);
 $("riverIn").addEventListener("change", useKm);
-// Boat ramps, downstream to upstream, as quick places to jump to.
-const RAMPS = DATA.ramps;
-RAMPS.forEach((r, i) => {
-  const o = document.createElement("option"); o.value = i; o.textContent = `${kmWords(r.km, r.river)}: ${r.name}`;
-  $("rampIn").appendChild(o);
-});
+// Boat ramps, then clubs (item 24; landmarks only, a club's pontoon may be for
+// members), downstream to upstream, as quick places to jump to. One list: ramps first.
+const RAMPS = DATA.ramps, CLUBS = DATA.clubs || [], JUMPS = [...RAMPS, ...CLUBS];
+for (const [label, list, from] of [["Boat and canoe ramps", RAMPS, 0], ["Clubs (landmarks only)", CLUBS, RAMPS.length]]) {
+  if (!list.length) continue;
+  const og = document.createElement("optgroup"); og.label = label;
+  list.forEach((r, i) => og.appendChild(new Option(`${kmWords(r.km, r.river)}: ${r.name}`, from + i)));
+  $("rampIn").appendChild(og);
+}
 function useRamp(i) {
-  const r = RAMPS[i];
+  const r = JUMPS[i];
   setPlace(r.lon, r.lat);
   if (map) map.easeTo({ center: [r.lon, r.lat], zoom: 15 });
 }
@@ -394,6 +397,22 @@ try {
     map.addLayer({ id: "ramp-labels", type: "symbol", source: "ramps", minzoom: 12.5, layout: {
       "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"], "text-size": 12, "text-offset": [0, 1.1],
       "text-anchor": "top", "text-optional": true }, paint: { "text-color": "#5d4a00", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
+    // Clubs: small purple dots, labelled when zoomed in. A tap shows the clubs there.
+    map.addSource("clubs", { type: "geojson", data: { type: "FeatureCollection", features: CLUBS.map((c, i) => ({
+      type: "Feature", properties: { i: RAMPS.length + i, name: c.name }, geometry: { type: "Point", coordinates: [c.lon, c.lat] } })) } });
+    map.addLayer({ id: "clubs", type: "circle", source: "clubs", paint: { "circle-radius": 5, "circle-color": "#7b4fa0",
+      "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } });
+    map.addLayer({ id: "club-labels", type: "symbol", source: "clubs", minzoom: 13, layout: {
+      "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"], "text-size": 11, "text-offset": [0, 1.0],
+      "text-anchor": "top", "text-optional": true }, paint: { "text-color": "#5b3a78", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
+    map.on("click", "clubs", e => {
+      const i = e.features[0].properties.i, c = JUMPS[i];
+      $("rampIn").value = i;
+      useRamp(i);
+      new maplibregl.Popup().setLngLat([c.lon, c.lat]).setText(`${c.clubs} (a landmark: the pontoon may be for members only)`).addTo(map);
+    });
+    map.on("mouseenter", "clubs", () => { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", "clubs", () => { map.getCanvas().style.cursor = ""; });
     map.on("click", "ramps", e => {
       const i = e.features[0].properties.i;
       $("rampIn").value = i;

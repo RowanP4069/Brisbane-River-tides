@@ -268,8 +268,23 @@ def ramp_places(path, end_km):
     return [{"name": n, "chainage_km": round(float(k), 2)} for n, k in zip(r.name, r.km)]
 
 
+def club_places(path, river_ends):
+    """Clubs from data/places.csv (item 24) on the predicted reach of each river drawn,
+    for the page's Place list: name, km on its river and the river's index on the page.
+    river_ends: {river id: (index, last predicted km)}. Landmarks only."""
+    if not Path(path).exists():
+        return []
+    c = pd.read_csv(path)
+    c = c[c.kind == "club"].assign(river=lambda d: d.river.map(rivers.norm))
+    out = []
+    for r in c.sort_values("km").itertuples():
+        if r.river in river_ends and 0 <= r.km <= river_ends[r.river][1]:
+            out.append({"name": r.name, "chainage_km": round(float(r.km), 2), "river": river_ends[r.river][0]})
+    return sorted(out, key=lambda x: (x["river"], x["chainage_km"]))
+
+
 def build_payload(frames, pts, h, bar_msl, step_min, stations, full_bar, hours,
-                  start_is_default, built=None, ramps=(), river_list=None):
+                  start_is_default, built=None, ramps=(), river_list=None, clubs=()):
     """Everything the page needs, as plain lists (JSON-ready). Becomes DATA in the page.
 
     The page computes heights itself for whichever day the viewer picks, from "model":
@@ -332,6 +347,7 @@ def build_payload(frames, pts, h, bar_msl, step_min, stations, full_bar, hours,
         "times": [t.strftime("%Y-%m-%dT%H:%M") for t in frames],
         "stations": stations,
         "ramps": list(ramps),
+        "clubs": list(clubs),                        # item 24: landmarks only
         "rivers": river_list or [{"id": "brisbane", "name": "Brisbane River",
                                   "confluence_km": None}],
         "points": {
@@ -618,7 +634,10 @@ def main():
     payload = build_payload(frames, pts, h, bar_msl, args.step_min,
                             labels, full, args.hours,
                             start_is_default, built,
-                            ramp_places(args.ramps, bris_end_km), river_list)
+                            ramp_places(args.ramps, bris_end_km), river_list,
+                            club_places(DATA / "places.csv",
+                                        {rv["id"]: (i, float(pts[pts.river == i].chainage_km.max()))
+                                         for i, rv in enumerate(river_list)}))
     if args.sandbox:
         obs = rivers.only(pd.read_csv(DATA / "observations.csv", dtype=str).fillna(""))
         payload["sandbox"] = sandbox_block(guesses, features, obs, kholo_km, end_km)

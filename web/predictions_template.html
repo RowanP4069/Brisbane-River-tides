@@ -1055,6 +1055,8 @@ $("exag").addEventListener("input", e => { state.exag = +e.target.value; update(
 const PLACES = [
   ...DATA.stations.map(s => ({ name: s.name, km: s.chainage_km, river: s.river || 0, group: "Tide stations (MSQ)" })),
   ...(DATA.ramps || []).map(r => ({ name: r.name, km: r.chainage_km, river: 0, group: "Boat ramps" })),
+  // Clubs (item 24): places people on the river know; landmarks only.
+  ...(DATA.clubs || []).map(c => ({ name: c.name, km: c.chainage_km, river: c.river, group: "Clubs (landmarks)" })),
   ...(SB ? SB.places : []).map(f => ({ name: f.name, km: f.chainage_km, river: 0, group: "Above Kholo Creek (features)" })),
 ];
 const placeSel = $("place");

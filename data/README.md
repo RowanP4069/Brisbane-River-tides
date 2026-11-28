@@ -14,6 +14,7 @@ Placeholders marked `TODO` are things I couldn't confirm from here. Fill them in
 | `observations.csv` | What field visits showed at those features (run running or drowned, water surface) | Field visits, with photos and videos kept privately |
 | `guesses.csv` | Named, dated guesses for the Guesswork (sandbox) page above Kholo Creek | The project's own guesses; not predictions |
 | `rivers.csv` | The rivers places can be on, and how a branch joins its parent | The project's own list (roadmap item 6) |
+| `places.csv` | Clubs on the rivers (rowing, canoe, sailing, dragon boat), as landmarks | Rowing Queensland's club list, OpenStreetMap and the project owner (roadmap item 24) |
 | `qld_watercourse_bremer_river.geojson` | Bremer River segments of the same QLD watercourse lines layer, as downloaded | QLD Department of Resources spatial service |
 | `centreline_bremer.csv` | Bremer River centreline, km 0 at the confluence with the Brisbane, 30 km upstream | Derived by `build_centreline.py --river bremer` from the file above |
 
@@ -102,6 +103,16 @@ Public boat ramps on the Brisbane River itself, from the mouth to the old weir r
 - **Maritime Safety Queensland (3 ramps: Goodna, Barellan Point, Colleges Crossing):** the council's list stops at its boundary, and Ipswich City Council's open data has no ramp list (checked 2026-11-09). These are read off the boat-ramp symbols on maps BR-2 and BR-1 of *Beacon to Beacon Guide: Brisbane River and Bremer River* (2018), © State of Queensland (Department of Transport and Main Roads), CC BY 4.0, using the map's 1-minute grid. Checked against two ramps the council also lists: the Jindalee symbol (BR-2) lands 15 m and the Kookaburra Park symbol (BR-1) 20 m from the council's positions. Goodna and Barellan Point match OpenStreetMap's slipways to 0.1 km. The positions are in `GUIDE_RAMPS` in `build_report.py`.
 - **Bremer River (3 access points, added 2026-11-28, item 19b):** the ones Ipswich City Council's *Canoeing and kayaking* page lists (Cribb Park, Shapcott Park, Joseph Brady Park; names only, as the page states no licence), placed from OpenStreetMap (© OpenStreetMap contributors, ODbL): the North Ipswich Boat Ramp slipway at Cribb Park (Bremer km 14.97); an unnamed slipway in Coalfalls taken to be the Shapcott Park canoe launch (km 21.17, a short way above the rock race, as Global Paddler describes; an inference); and the centre of Joseph Brady Park, which has no slipway mapped (km 0.22, 119 m from the centreline). The positions are in `OSM_RAMPS` in `build_report.py`; the rows were added to this file as `make_ramps()` computes them, without re-fetching the council list.
 - **Columns:** `name`, `river`, `km`, `lat`, `lon`, `source` (council asset id, the guide map, or the OpenStreetMap feature). `km` is the ramp projected onto its river's centreline (`centreline.csv`, or `centreline_bremer.csv` from the confluence). Brisbane ramps first, then each branch's, each by km.
+
+---
+
+## `places.csv`
+
+Clubs on the rivers (`kind` = `club`), added 2026-11-28 (roadmap item 24): places people on the water know, shown in the Place lists of the predictions and report pages and as labelled dots on the report map. They are **landmarks only**: a club's pontoon may be for members, so the pages never suggest launching there. A place is a shed or pontoon, so several clubs that share one are one row (`clubs` lists them, separated by `;`).
+
+- **Sources:** club names from Rowing Queensland's club list (rowingqld.asn.au/community/qld-clubs, read 2026-11-28) and OpenStreetMap; which clubs share a shed after the post-flood mergers, and most positions, from the project owner, who placed each pontoon (`position_source` says which, row by row). Where a position is an address, it was looked up with OpenStreetMap's address search (Nominatim). © OpenStreetMap contributors, ODbL.
+- **Left out for now:** Old Collegians (dropped by the project owner); a separate Eric Freeman Boathouse and the unnamed rowing building near King's College (dropped); KAND Rowing Club, whose pontoon (-27.527028, 152.996040) is on Oxley Creek, 459 m from the Brisbane centreline (nearest Brisbane km 36.21): to add back if Oxley Creek becomes a branch; Ipswich District Canoe Club (Brassall: no launch place found); Dragons Rowing Club (its listed address in Albion is 1.2 km from the river).
+- **Columns:** `place_id`, `kind`, `name`, `clubs`, `river`, `km` (projected onto the river's own centreline, as `ramps.csv`), `lat`, `lon`, `position_source`, `name_source`, `checked` (date last checked).
 
 ---
 

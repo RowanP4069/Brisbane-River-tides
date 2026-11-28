@@ -77,6 +77,9 @@ REPORT_KM_MAX = rivers.report_km_max(rivers.DEFAULT)
 
 # Boat ramps (data/ramps.csv): location references only, no details.
 RAMPS_CSV = DATA / "ramps.csv"
+# Clubs (item 24): data/places.csv, kind "club". Landmarks only: a club's pontoon may
+# be for members, so the page never suggests launching there.
+PLACES_CSV = DATA / "places.csv"
 BCC_RAMPS_URL = ("https://data.brisbane.qld.gov.au/api/explore/v2.1/catalog/datasets/"
                  "boat-ramp-locations/exports/json")
 # Brisbane City Council's list stops at its boundary, so the other public ramps come from
@@ -218,6 +221,9 @@ def build_payload(built=None, today=None, reports_ref=REPORTS_REF):
         "reports": recent_reports(today, reports_ref),
         "ramps": pd.read_csv(RAMPS_CSV).assign(river=lambda d: d.river.map(rivers.norm))
                    [["name", "river", "km", "lat", "lon"]].to_dict("records"),
+        "clubs": (pd.read_csv(PLACES_CSV).query("kind == 'club'").assign(river=lambda d: d.river.map(rivers.norm))
+                  [["name", "clubs", "river", "km", "lat", "lon"]].to_dict("records")
+                  if PLACES_CSV.exists() else []),
     }
 
 
