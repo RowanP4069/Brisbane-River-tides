@@ -61,7 +61,7 @@
 <body>
 <header>
   <nav class="pages"><a href="index.html">Height predictions</a><a href="gauges.html">Gauges (measured)</a><a href="compare.html">Measured vs predicted</a><a href="report.html" aria-current="page">Report the flow</a><a href="results.html">Report the flow (results)</a><a href="guesswork.html" title="Guesswork: Kholo Creek to the weir ruin (sandbox)">Guesses</a></nav>
-  <h1>Report the flow: which way is the Brisbane River running?</h1>
+  <h1>Report the flow: which way is the river running?</h1>
 </header>
 
 <main>
@@ -75,7 +75,7 @@
   <div id="map"></div>
   <div class="row">
     <button type="button" id="locate">📍 Use my location</button>
-    <span class="muted" id="mapHint">or tap the river on the map (yellow dots are boat ramps)</span>
+    <span class="muted" id="mapHint">or tap the river on the map (yellow dots are boat ramps, purple dots are clubs)</span>
   </div>
   <div class="row"><label class="muted">Near a boat ramp or a club?
     <select id="rampIn"><option value="">choose…</option></select></label></div>
@@ -363,6 +363,13 @@ for (const [label, list, from] of [["Boat and canoe ramps", RAMPS, 0], ["Clubs (
   list.forEach((r, i) => og.appendChild(new Option(`${kmWords(r.km, r.river)}: ${r.name}`, from + i)));
   $("rampIn").appendChild(og);
 }
+// Clubs at a ramp: metres apart, in a flat local projection, as snap().
+const SAME_PLACE_M = 30;
+const metresApart = (a, b) => Math.hypot((a.lon - b.lon) * 111320 * Math.cos(a.lat * Math.PI / 180), (a.lat - b.lat) * 110540);
+const rampClubs = {}, clubsAtRamp = new Set();
+CLUBS.forEach((c, k) => RAMPS.forEach((r, i) => {
+  if (metresApart(c, r) <= SAME_PLACE_M) { (rampClubs[i] = rampClubs[i] || []).push(RAMPS.length + k); clubsAtRamp.add(RAMPS.length + k); }
+}));
 function useRamp(i) {
   const r = JUMPS[i];
   setPlace(r.lon, r.lat);
@@ -398,8 +405,11 @@ try {
       "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"], "text-size": 12, "text-offset": [0, 1.1],
       "text-anchor": "top", "text-optional": true }, paint: { "text-color": "#5d4a00", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
     // Clubs: small purple dots, labelled when zoomed in. A tap shows the clubs there.
-    map.addSource("clubs", { type: "geojson", data: { type: "FeatureCollection", features: CLUBS.map((c, i) => ({
-      type: "Feature", properties: { i: RAMPS.length + i, name: c.name }, geometry: { type: "Point", coordinates: [c.lon, c.lat] } })) } });
+    // A club at a ramp (within SAME_PLACE_M, e.g. Ipswich Dragon Boat Club at Cribb Park)
+    // gets no dot of its own, so the two don't stack: the ramp's tap names it instead.
+    map.addSource("clubs", { type: "geojson", data: { type: "FeatureCollection", features: CLUBS.flatMap((c, i) =>
+      clubsAtRamp.has(RAMPS.length + i) ? [] : [{
+      type: "Feature", properties: { i: RAMPS.length + i, name: c.name }, geometry: { type: "Point", coordinates: [c.lon, c.lat] } }]) } });
     map.addLayer({ id: "clubs", type: "circle", source: "clubs", paint: { "circle-radius": 5, "circle-color": "#7b4fa0",
       "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } });
     map.addLayer({ id: "club-labels", type: "symbol", source: "clubs", minzoom: 13, layout: {
@@ -417,6 +427,9 @@ try {
       const i = e.features[0].properties.i;
       $("rampIn").value = i;
       useRamp(i);
+      const here = (rampClubs[i] || []).map(j => JUMPS[j].clubs);
+      if (here.length) new maplibregl.Popup().setLngLat([RAMPS[i].lon, RAMPS[i].lat])
+        .setText(`${RAMPS[i].name}. Also here: ${here.join("; ")} (a club: the pontoon may be for members only).`).addTo(map);
     });
     map.on("mouseenter", "ramps", () => { map.getCanvas().style.cursor = "pointer"; });
     map.on("mouseleave", "ramps", () => { map.getCanvas().style.cursor = ""; });
