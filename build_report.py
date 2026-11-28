@@ -41,7 +41,7 @@ import pandas as pd
 from build_gauges import project_onto
 from collect_gauges import USER_AGENT
 from river_tides import (BRISBANE, DATA, HERE, load_bars, load_stations, station_labels,
-                         to_json, write_html)
+                         station_table, to_json, write_html)
 import rivers
 
 # The Google Form the page posts to. The page sends two answers: "report", the part that
@@ -71,7 +71,9 @@ REPORTS_REF = "origin/reports"
 # the project owner's experience kayaking it, the gravel runs just below the ruin are
 # where the tide stops. Between Kholo Creek (the last MSQ station, where the
 # predictions stop) and here, reports are kept but get no verdict.
-REPORT_KM_MAX = 87.4
+# Each river's limit is in data/rivers.csv (report_km_max): the Brisbane's is 87.4; the
+# Bremer's is the Sadliers Crossing race, km 22.3 (agreed 2026-11-28, item 19b).
+REPORT_KM_MAX = rivers.report_km_max(rivers.DEFAULT)
 
 # Boat ramps (data/ramps.csv): location references only, no details.
 RAMPS_CSV = DATA / "ramps.csv"
@@ -143,8 +145,9 @@ def recent_reports(today, ref=REPORTS_REF):
         text = subprocess.run(["git", "-C", str(HERE), "show", f"{ref}:reports/{n}"],
                               check=True, capture_output=True, text=True).stdout
         for r in csv.DictReader(io.StringIO(text)):
-            if r["time_aest"][:10] >= since and rivers.norm(r.get("river")) == rivers.DEFAULT:
-                out.append({"time": r["time_aest"], "km": float(r["km"]), "bank": r["bank"],
+            if r["time_aest"][:10] >= since:
+                out.append({"time": r["time_aest"], "river": rivers.norm(r.get("river")),
+                            "km": float(r["km"]), "bank": r["bank"],
                             "alias": r["alias"], "dir": r["dir"], "strength": int(r["strength"]),
                             "verdict": r["verdict"]})
     return sorted(out, key=lambda r: r["time"], reverse=True)
@@ -160,7 +163,21 @@ def build_payload(built=None, today=None, reports_ref=REPORTS_REF):
         raise SystemExit("No Bar predictions around today: add the year's file (fetch_bar.py)")
     km_max = float(st.chainage_km.max())                  # Kholo Creek: the model's end
     cl = pd.read_csv(DATA / "centreline.csv")
-    river = cl[cl.chainage_km <= REPORT_KM_MAX + 0.5]
+    # Every river (item 19b): its centreline to just past its report limit, where its
+    # predictions end (its last MSQ station) and its station table for heightAt().
+    river_list, branches = [], {}
+    for rid, row in rivers.load().items():
+        tab = st if rid == rivers.DEFAULT else station_table(rid)
+        line = cl if rid == rivers.DEFAULT else pd.read_csv(DATA / row["centreline"])
+        line = line[line.chainage_km <= float(row["report_km_max"]) + 0.5]
+        river_list.append({"id": rid, "name": row["name"],
+                           "km_max": float(tab.chainage_km.max()),
+                           "report_km_max": float(row["report_km_max"]),
+                           "line": {"lon": line.lon.round(6).tolist(), "lat": line.lat.round(6).tolist(),
+                                    "km": line.chainage_km.round(4).tolist()}})
+        if rid != rivers.DEFAULT:
+            branches[rid] = {"km": tab.chainage_km.tolist(), "lag_min": tab.lag_min.tolist(),
+                             "ratio": tab.ratio.tolist(), "msl_m": tab.msl_m.tolist()}
     meta = {"km_max": km_max, "report_km_max": REPORT_KM_MAX, "max_off_m": MAX_OFF_M,
             "report_days": REPORT_DAYS,
             "timezone": "AEST (UTC+10)"}
@@ -175,10 +192,11 @@ def build_payload(built=None, today=None, reports_ref=REPORTS_REF):
             # Stations, mouth to upstream, for interpolation along the river.
             "km": st.chainage_km.tolist(), "lag_min": st.lag_min.tolist(),
             "ratio": st.ratio.tolist(), "msl_m": st.msl_m.tolist(),
+            # Branches of the Brisbane, by km on the branch (river_tides.station_table).
+            "branches": branches,
         },
         "stations": station_labels(st, DATA / "centreline.csv"),
-        "river": {"lon": river.lon.round(6).tolist(), "lat": river.lat.round(6).tolist(),
-                  "km": river.chainage_km.round(4).tolist()},
+        "rivers": river_list,
         "reports": recent_reports(today, reports_ref),
         "ramps": rivers.only(pd.read_csv(RAMPS_CSV))[["name", "km", "lat", "lon"]].to_dict("records"),
     }

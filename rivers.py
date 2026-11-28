@@ -29,6 +29,12 @@ def ids(path=DATA / "rivers.csv"):
     return set(load(path))
 
 
+def report_km_max(river, path=DATA / "rivers.csv"):
+    """Flow reports on this river are taken from km 0 to here (Report the flow): the
+    Brisbane to the old weir ruin, the Bremer to the Sadliers Crossing race."""
+    return float(load(path)[river]["report_km_max"])
+
+
 def norm(value):
     """A river value as stored: stripped and lower case, blank or missing = brisbane."""
     # value != value: pandas reads a blank cell as NaN, which is not equal to itself.

@@ -81,7 +81,8 @@
     <select id="rampIn"><option value="">choose…</option></select></label></div>
   <div class="row" id="noMap">
     <span class="muted">The map couldn't start in this browser. Use your location, or give the place as distance
-      up the river from the Brisbane Bar:</span>
+      up the river (Brisbane: from the Brisbane Bar; Bremer: from where it joins the Brisbane):</span>
+    <select id="riverIn" aria-label="River"></select>
     <label>km <input type="number" id="kmIn" min="0" step="0.1" style="width:6em"></label>
     <select id="bankIn"><option value="mid">mid-river</option><option value="left">left bank (looking downstream)</option>
       <option value="right">right bank (looking downstream)</option></select>
@@ -215,8 +216,11 @@ function interp(x, xs, ys) {         // as np.interp: linear, held at the ends
   while (xs[j] < x) j++;
   return ys[j - 1] + (ys[j] - ys[j - 1]) * (x - xs[j - 1]) / (xs[j] - xs[j - 1]);
 }
-function heightAt(km, ms) {          // m above local LAT
-  const lag = interp(km, M.km, M.lag_min), ratio = interp(km, M.km, M.ratio), msl = interp(km, M.km, M.msl_m);
+// river: "brisbane" (default; M itself) or a branch in M.branches, by km on the branch
+// (item 19b; river_tides.station_table gives both tables).
+function heightAt(km, ms, river) {   // m above local LAT
+  const T = river && river !== "brisbane" ? M.branches[river] : M;
+  const lag = interp(km, T.km, T.lag_min), ratio = interp(km, T.km, T.ratio), msl = interp(km, T.km, T.msl_m);
   return msl + ratio * barAnomaly(ms - lag * MIN_MS);
 }
 // ---- Model: END --------------------------------------------------------------------
@@ -225,8 +229,8 @@ function heightAt(km, ms) {          // m above local LAT
 const TURN_MIN = 45;                 // within this of high/low water = "near the turn"
 // Rising or falling at (km, ms), and the nearest predicted high or low water within 8 h
 // (scanned every 2 minutes; the top is flat enough that 2 min is plenty).
-function tideState(km, ms) {
-  const h = t => heightAt(km, t);
+function tideState(km, ms, river) {
+  const h = t => heightAt(km, t, river);
   const d = h(ms + 5 * MIN_MS) - h(ms - 5 * MIN_MS);
   if (!Number.isFinite(d)) return null;
   const step = 2 * MIN_MS, ts = [], hs = [];
@@ -240,10 +244,14 @@ function tideState(km, ms) {
 }
 const fmtMin = m => { m = Math.round(Math.abs(m)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
 // Verdict for a reported direction: "match" | "turn" | "mismatch" | "none", with words.
-function verdictFor(dir, st, km) {
-  if (km > KM_MAX + 0.2) return { v: "none", head: "No prediction here",
-    text: `This is above Kholo Creek (km ${KM_MAX.toFixed(1)}), where the tide tables stop, so there's nothing to compare with. `
-      + "Your report is still recorded: reports are the only evidence of how the flow behaves up to the weir." };
+function verdictFor(dir, st, km, river = "brisbane") {
+  const rv = RIVER_BY_ID[river];
+  if (km > rv.km_max + 0.2) return { v: "none", head: "No prediction here",
+    text: river === "brisbane"
+      ? `This is above Kholo Creek (km ${rv.km_max.toFixed(1)}), where the tide tables stop, so there's nothing to compare with. `
+        + "Your report is still recorded: reports are the only evidence of how the flow behaves up to the weir."
+      : `This is above Warrego Highway Bridge (${rv.name} km ${rv.km_max.toFixed(1)}), where the tide tables stop, so there's nothing to compare with. `
+        + "Your report is still recorded: reports are the only evidence of how the flow behaves up to the tidal races above Ipswich." };
   if (!st) return { v: "none", head: "Can't compare", text: "The predictions loaded in this page don't cover that time." };
   const nearTurn = st.turn && Math.abs(st.minFromTurn) <= TURN_MIN;
   const turnWords = st.turn ? `Predicted ${st.turn.kind} water there was ${fmtMin(st.minFromTurn)} `
@@ -262,10 +270,22 @@ function verdictFor(dir, st, km) {
 }
 
 // ---- Place: snap to the river centreline ---------------------------------------------
-const R = DATA.river;
-// Nearest point on the centreline: { km, off (m), bank }, as build_gauges.project_onto(),
-// in a flat local projection. Bank as seen looking downstream; "mid" within 30 m.
+// Every river's centreline (item 19b): a pin snaps to the nearest point on any of them.
+const RIVERS = DATA.rivers, RIVER_BY_ID = Object.fromEntries(RIVERS.map(r => [r.id, r]));
+const R = RIVER_BY_ID.brisbane.line;
+// "Bremer River km 3.1", or "km 40.0" on the Brisbane.
+const kmWords = (km, river, dp = 1) => `${river && river !== "brisbane" ? RIVER_BY_ID[river].name + " " : ""}km ${km.toFixed(dp)}`;
 function snap(lon, lat) {
+  let best = { off: Infinity };
+  for (const rv of RIVERS) {
+    const s = snapLine(rv.line, lon, lat);
+    if (s.off < best.off) best = { ...s, river: rv.id };
+  }
+  return best;
+}
+// Nearest point on one centreline: { km, off (m), bank }, as build_gauges.project_onto(),
+// in a flat local projection. Bank as seen looking downstream; "mid" within 30 m.
+function snapLine(R, lon, lat) {
   const kx = 111320 * Math.cos(lat * Math.PI / 180), ky = 110540;
   let best = { off: Infinity };
   for (let i = 0; i < R.lon.length - 1; i++) {
@@ -282,16 +302,19 @@ function snap(lon, lat) {
   }
   return best;
 }
-const lonLatAt = km => [interp(km, R.km, R.lon), interp(km, R.km, R.lat)];
+const lonLatAt = (km, river = "brisbane") => {
+  const L = RIVER_BY_ID[river].line;
+  return [interp(km, L.km, L.lon), interp(km, L.km, L.lat)];
+};
 // Predictions reach Kholo Creek (KM_MAX); reports are taken up to the old weir ruin
 // (REPORT_KM_MAX), where the tide stops. In between, a report gets no verdict.
 const POPUP_MAX = 5;            // reports listed when a map dot is tapped
 const KM_MAX = DATA.meta.km_max, REPORT_KM_MAX = DATA.meta.report_km_max, MAX_OFF = DATA.meta.max_off_m;
 const BANK_WORDS = { mid: "mid-river", left: "left bank (looking downstream)", right: "right bank (looking downstream)" };
-const place = { lon: null, lat: null, km: null, off: null, bank: null };
+const place = { lon: null, lat: null, river: "brisbane", km: null, off: null, bank: null };
 function setPlace(lon, lat) {
   const s = snap(lon, lat);
-  Object.assign(place, { lon, lat, km: s.km, off: s.off, bank: s.bank });
+  Object.assign(place, { lon, lat, river: s.river, km: s.km, off: s.off, bank: s.bank });
   showPlace();
   if (marker) marker.setLngLat([lon, lat]).addTo(map);
 }
@@ -300,13 +323,18 @@ function showPlace() {
   if (place.km === null) { el.textContent = "No place chosen yet."; el.className = "muted"; return; }
   const bad = placeProblem();
   el.className = bad ? "bad" : "";
-  el.textContent = bad || `${place.km.toFixed(1)} km up the river from the Brisbane Bar, ${BANK_WORDS[place.bank]}`
+  const up = place.river === "brisbane" ? "up the river from the Brisbane Bar"
+    : `up the ${RIVER_BY_ID[place.river].name} from where it joins the Brisbane`;
+  el.textContent = bad || `${place.km.toFixed(1)} km ${up}, ${BANK_WORDS[place.bank]}`
     + (place.off !== null ? ` (${Math.round(place.off)} m from mid-river).` : ".");
 }
 function placeProblem() {
   if (place.km === null) return "Choose a place: tap the river, or use your location.";
   if (place.off !== null && place.off > MAX_OFF) return `That's ${Math.round(place.off)} m from the river. Tap on the water, or move closer.`;
-  if (place.km > REPORT_KM_MAX) return `That's above the old weir ruin below Mt Crosby (km ${REPORT_KM_MAX.toFixed(1)}), where the tide stops.`;
+  const lim = RIVER_BY_ID[place.river].report_km_max;
+  if (place.km > lim) return place.river === "brisbane"
+    ? `That's above the old weir ruin below Mt Crosby (km ${lim.toFixed(1)}), where the tide stops.`
+    : `That's above the rock race at Sadliers Crossing (${kmWords(lim, place.river)}), where the tide stops.`;
   return null;
 }
 $("locate").addEventListener("click", () => {
@@ -320,10 +348,12 @@ $("locate").addEventListener("click", () => {
 function useKm() {                   // the no-map fallback
   const km = parseFloat($("kmIn").value);
   if (!Number.isFinite(km)) return;
-  Object.assign(place, { lon: null, lat: null, km: Math.max(0, km), off: null, bank: $("bankIn").value });
+  Object.assign(place, { lon: null, lat: null, river: $("riverIn").value, km: Math.max(0, km), off: null, bank: $("bankIn").value });
   showPlace();
 }
+for (const rv of RIVERS) $("riverIn").add(new Option(rv.name, rv.id));
 $("kmIn").addEventListener("input", useKm);
+$("riverIn").addEventListener("change", useKm);
 // Boat ramps, downstream to upstream, as quick places to jump to.
 const RAMPS = DATA.ramps;
 RAMPS.forEach((r, i) => {
@@ -342,7 +372,8 @@ $("bankIn").addEventListener("change", useKm);
 let map = null, marker = null;
 try {
   map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/positron",
-    center: [152.99, -27.49], zoom: 10.3 });
+    // Wide enough for the Bar and Ipswich (the Bremer, item 19b) on a phone.
+    center: [152.95, -27.52], zoom: 10.0 });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   marker = new maplibregl.Marker({ color: "#c0392b" });
   map.on("click", e => {
@@ -352,8 +383,9 @@ try {
     setPlace(e.lngLat.lng, e.lngLat.lat);
   });
   map.on("load", () => {
-    map.addSource("river", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString",
-      coordinates: R.lon.map((x, i) => [x, R.lat[i]]) } } });
+    map.addSource("river", { type: "geojson", data: { type: "FeatureCollection", features: RIVERS.map(rv => ({
+      type: "Feature", properties: { id: rv.id }, geometry: { type: "LineString",
+        coordinates: rv.line.lon.map((x, i) => [x, rv.line.lat[i]]) } })) } });
     map.addLayer({ id: "river", type: "line", source: "river", paint: { "line-color": "#1f6fb2", "line-width": 2, "line-opacity": .5 } });
     map.addSource("ramps", { type: "geojson", data: { type: "FeatureCollection", features: RAMPS.map((r, i) => ({
       type: "Feature", properties: { i, name: r.name }, geometry: { type: "Point", coordinates: [r.lon, r.lat] } })) } });
@@ -370,7 +402,7 @@ try {
     map.on("mouseenter", "ramps", () => { map.getCanvas().style.cursor = "pointer"; });
     map.on("mouseleave", "ramps", () => { map.getCanvas().style.cursor = ""; });
     map.addSource("reports", { type: "geojson", data: { type: "FeatureCollection", features: DATA.reports.map((r, i) => ({
-      type: "Feature", id: i, properties: { i }, geometry: { type: "Point", coordinates: lonLatAt(r.km) } })) } });
+      type: "Feature", id: i, properties: { i }, geometry: { type: "Point", coordinates: lonLatAt(r.km, r.river || "brisbane") } })) } });
     map.addLayer({ id: "reports", type: "circle", source: "reports", paint: { "circle-radius": 6, "circle-color": "#1d2329",
       "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } });
     // Reports at the same km share a spot, so a tap lists all of them: the newest few,
@@ -413,7 +445,7 @@ const DIR_WORDS = { up: "upstream", down: "downstream", slack: "slack", swirl: "
 const STRENGTH_WORDS = ["slack", "gentle", "moderate", "strong", "very strong"];
 const fmtWhen = iso => new Date(isoMs(iso)).toLocaleString("en-AU", { timeZone: "UTC", weekday: "short", day: "numeric",
   month: "short", hour: "numeric", minute: "2-digit" });
-const reportLine = r => `${fmtWhen(r.time)}, km ${r.km.toFixed(1)}: ${DIR_WORDS[r.dir] || r.dir}`
+const reportLine = r => `${fmtWhen(r.time)}, ${kmWords(r.km, r.river)}: ${DIR_WORDS[r.dir] || r.dir}`
   + `${r.dir === "slack" || r.dir === "swirl" ? "" : ", " + STRENGTH_WORDS[r.strength]} (${r.alias || "anonymous"})`;
 $("recentCount").textContent = `(last ${DATA.meta.report_days} days: ${DATA.reports.length})`;
 for (const r of DATA.reports.slice(0, 10)) {
@@ -463,8 +495,7 @@ function problems() {
 // to the nearest 50 m (so the daily job can recheck it). Version 1.
 function buildReport(ms, verdict, device) {
   const speed = parseFloat($("speed").value), clarity = picked("clarity");
-  // river (item 6): always brisbane until the Bremer branch (19b) snaps to two lines.
-  return { v: 1, time: msIso(ms), river: "brisbane", km: Math.round(place.km * 10) / 10, bank: place.bank,
+  return { v: 1, time: msIso(ms), river: place.river, km: Math.round(place.km * 10) / 10, bank: place.bank,
     off_m: place.off === null ? null : Math.round(place.off / 50) * 50,
     alias: $("alias").value.trim().slice(0, 30), dir_kind: "river", dir: picked("dir"),
     strength: picked("strength") === null ? null : +picked("strength"),
@@ -482,7 +513,7 @@ $("send").addEventListener("click", async () => {
   const errs = problems();
   $("errors").textContent = errs.join(" ");
   if (errs.length) return;
-  const ms = isoMs($("when").value), st = tideState(place.km, ms), ver = verdictFor(picked("dir"), st, place.km);
+  const ms = isoMs($("when").value), st = tideState(place.km, ms, place.river), ver = verdictFor(picked("dir"), st, place.km, place.river);
   const device = deviceId(), report = buildReport(ms, ver.v, device);
   const priv = { lat: place.lat, lon: place.lon, off_m: place.off === null ? null : Math.round(place.off),
     notes: $("notes").value.trim().slice(0, 1000), device };

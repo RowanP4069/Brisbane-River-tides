@@ -18,7 +18,9 @@ Checks (a report failing any is left out, and counted in the printout):
   - JSON version 1, every field of the expected kind and range
   - the reported time no later than 10 min after it was submitted, and no more than
     2 days (plus 10 min) before
-  - the place: km 0 to the old weir ruin (km 87.4), a bank, within 350 m of the centreline
+  - the place: a river in data/rivers.csv (missing = brisbane), km 0 to that river's
+    report limit (Brisbane: the old weir ruin, km 87.4; Bremer: Sadliers Crossing,
+    km 22.3), a bank, within 350 m of the centreline
   - no exact repeat of an accepted report (double taps)
 Aliases are trimmed to 30 characters; one containing a web address is blanked.
 
@@ -59,7 +61,8 @@ BANKS = {"mid", "left", "right"}
 PROBLEMS = {"debris", "rubbish", "foam", "oil", "algae"}
 VERDICTS = {"match", "turn", "mismatch", "none"}
 MAX_OFF_M = 350                  # as build_report.MAX_OFF_M
-KM_MAX = 87.4                    # the old weir ruin, as build_report.REPORT_KM_MAX
+# km limits per river: data/rivers.csv report_km_max (Brisbane 87.4, the old weir ruin;
+# Bremer 22.3, the Sadliers Crossing race), as the report page.
 SLACK_TIME = timedelta(minutes=10)
 MAX_AGE = timedelta(days=2)
 
@@ -133,7 +136,7 @@ def check(submitted, raw):
     if river is not None and not (isinstance(river, str) and rivers.norm(river) in rivers.ids()):
         return "unknown river"
     river = rivers.norm(river)
-    if not is_num(r.get("km"), 0, KM_MAX):
+    if not is_num(r.get("km"), 0, rivers.report_km_max(river)):
         return "km out of range"
     if r.get("bank") not in BANKS:
         return "bad bank"

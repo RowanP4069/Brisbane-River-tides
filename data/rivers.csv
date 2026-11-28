@@ -1,3 +1,3 @@
-river,name,parent,confluence_km,centreline
-brisbane,Brisbane River,,,centreline.csv
-bremer,Bremer River,brisbane,70.05,centreline_bremer.csv
+river,name,parent,confluence_km,centreline,report_km_max
+brisbane,Brisbane River,,,centreline.csv,87.4
+bremer,Bremer River,brisbane,70.05,centreline_bremer.csv,22.3

@@ -158,6 +158,26 @@ def add_corrections(pts, st):
     return pts
 
 
+def station_table(river=rivers.DEFAULT, stations_path=DATA / "stations.csv"):
+    """The stations a river's lag, ratio and MSL are interpolated between, by km on
+    that river (columns name, chainage_km, lag_min, ratio, msl_m and, for the
+    Brisbane, the rest of stations.csv). For a branch: a first row at km 0 with the
+    parent's interpolated values at the confluence, then the branch's own stations.
+    Shared by this page, the report page and build_results.py, so they agree."""
+    st = load_stations(stations_path)
+    if river == rivers.DEFAULT:
+        return st
+    row = rivers.load()[river]
+    conf_km = float(row["confluence_km"])
+    bst = load_stations(stations_path, river=river)
+    if bst.empty:
+        raise SystemExit(f"{river}: no complete stations in {stations_path}")
+    conf = {"name": f"Confluence (Brisbane km {conf_km:g})", "chainage_km": 0.0}
+    conf.update({c: float(np.interp(conf_km, st.chainage_km, st[c]))
+                 for c in ["lag_min", "ratio", "msl_m"]})
+    return pd.concat([pd.DataFrame([conf]), bst[list(conf)]], ignore_index=True)
+
+
 def branch_points(river, st_parent, stations_path, spacing_km):
     """Model points along a branch of the Brisbane (roadmap item 19), km 0 at the
     confluence, up to the branch's last MSQ station (the 14 Nov rule: no prediction
@@ -168,16 +188,9 @@ def branch_points(river, st_parent, stations_path, spacing_km):
     stations. For the Bremer that is Brisbane km 70.05 (lag ~150 min) to Warrego
     Highway Bridge, Bremer km 5.3 (162.5 min, derived ratio 1.21, MSL 1.21).
     """
-    row = rivers.load()[river]
-    conf_km = float(row["confluence_km"])
+    table = station_table(river, stations_path)
     bst = load_stations(stations_path, river=river)
-    if bst.empty:
-        raise SystemExit(f"{river}: no complete stations in {stations_path}")
-    conf = {"name": f"Confluence (Brisbane km {conf_km:g})", "chainage_km": 0.0}
-    conf.update({c: float(np.interp(conf_km, st_parent.chainage_km, st_parent[c]))
-                 for c in ["lag_min", "ratio", "msl_m"]})
-    table = pd.concat([pd.DataFrame([conf]), bst[list(conf)]], ignore_index=True)
-    path = DATA / row["centreline"]
+    path = DATA / rivers.load()[river]["centreline"]
     pts = add_corrections(sample_centreline(path, spacing_km, float(bst.chainage_km.max())), table)
     return pts, bst, path
 

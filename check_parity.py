@@ -132,7 +132,7 @@ const fs = require("fs");
 const DATA = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 eval(fs.readFileSync(process.argv[3], "utf8"));
 const q = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
-process.stdout.write(JSON.stringify(q.map(([km, t]) => heightAt(km, isoMs(t)))));
+process.stdout.write(JSON.stringify(q.map(([km, t, river]) => heightAt(km, isoMs(t), river))));
 """
 
 
@@ -153,7 +153,17 @@ def check_report(tmp):
     times = pd.date_range("2026-11-08 00:00", "2026-11-12 23:00", freq="97min")
     pts = add_corrections(pd.DataFrame({"chainage_km": kms}), st)
     py = heights(bar, times, pts, bar_msl)                             # [time, km]
-    q = [[km, f"{t:%Y-%m-%dT%H:%M}"] for t in times for km in kms]
+    q = [[km, f"{t:%Y-%m-%dT%H:%M}", "brisbane"] for t in times for km in kms]
+    # Branches (item 19b): their own station tables, by km on the branch, past the
+    # last station too (held there, as on the Brisbane above Kholo).
+    from river_tides import station_table
+    for rid in payload["model"].get("branches", {}):
+        bkms = [0, 1.7, 5.3, 12.0]
+        bpts = add_corrections(pd.DataFrame({"chainage_km": bkms}), station_table(rid))
+        py = np.hstack([py.reshape(len(times), -1), heights(bar, times, bpts, bar_msl)])
+        kms = kms + bkms
+        q = [[km, f"{t:%Y-%m-%dT%H:%M}", "brisbane" if j < len(kms) - len(bkms) else rid]
+             for t in times for j, km in enumerate(kms)]
     (tmp / "q.json").write_text(json.dumps(q))
     (tmp / "report_model.js").write_text(model_block(REPORT_TEMPLATE), encoding="utf-8")
     (tmp / "report_runner.js").write_text(REPORT_RUNNER, encoding="utf-8")
