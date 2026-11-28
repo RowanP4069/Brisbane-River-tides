@@ -20,6 +20,8 @@ Usage:
   python build_centreline.py                    # rebuild from the saved download, report
   python build_centreline.py --fetch            # download again first (replaces the file)
   python build_centreline.py --write-stations   # also update chainage_km in stations.csv
+  python build_centreline.py --river bremer [--fetch] [--write-stations]
+                                               # a branch (roadmap item 19), see BRANCHES
 
 Sources:
   - Watercourse lines - Queensland (Department of Resources), CC BY 4.0:
@@ -64,6 +66,21 @@ GAUGE_LAT = -(27 + 24.096 / 60)
 KM0_TOWARD_LON = 153.152957
 KM0_TOWARD_LAT = -27.398662
 
+# Branches of the Brisbane (roadmap item 19; Decisions 2026-11-23): each has its own
+# centreline from the same watercourse layer, km 0 at the confluence, where it is joined
+# by a straight segment to the nearest point of the Brisbane centreline (as the Bar
+# gauge is joined at the mouth). The path runs from there to max_km upstream: far
+# enough for the branch's MSQ station and its reports (19b), not to the source.
+BRANCHES = {
+    "bremer": {
+        "name": "Bremer River",
+        "raw": DATA / "qld_watercourse_bremer_river.geojson",
+        "out": DATA / "centreline_bremer.csv",
+        "bbox": (152.55, -27.75, 152.90, -27.54),   # confluence to past Amberley
+        "max_km": 30.0,
+    },
+}
+
 R_EARTH = 6371.0088  # km, mean Earth radius
 LAT0 = -27.5         # reference latitude for the local flat projection
 
@@ -101,11 +118,11 @@ def turn_km0(coords):
     return [new] + coords[1:]
 
 
-def fetch(path):
-    """Download the Brisbane River segments as GeoJSON and save the bytes unchanged."""
+def fetch(path, name="Brisbane River", bbox=BBOX):
+    """Download one river's segments as GeoJSON and save the bytes unchanged."""
     q = {
-        "where": "name='Brisbane River'",
-        "geometry": ",".join(str(v) for v in BBOX),
+        "where": f"name='{name}'",
+        "geometry": ",".join(str(v) for v in bbox),
         "geometryType": "esriGeometryEnvelope",
         "inSR": "4326",
         "spatialRel": "esriSpatialRelIntersects",
@@ -241,7 +258,7 @@ def snap(px, py, x, y, ch):
     return d, seg_ch
 
 
-def station_report(coords, ch, stations_path, sep_km=2.0):
+def station_report(coords, ch, stations_path, sep_km=2.0, river=rivers.DEFAULT):
     """Snap stations and flag any whose position is nearly as close to a different
     reach of river (>= sep_km of chainage away). Those are likely on the wrong bend."""
     x, y = to_xy([c[0] for c in coords], [c[1] for c in coords])
@@ -253,7 +270,7 @@ def station_report(coords, ch, stations_path, sep_km=2.0):
           f"{'2nd reach':>16s}  flag")
     out = []
     for r in rows:
-        if rivers.norm(r.get("river")) != rivers.DEFAULT:
+        if rivers.norm(r.get("river")) != river:
             continue        # another river's station: snapped to its own centreline
         if not r["lat"]:
             continue        # no position (Mt Crosby Weir: not in the MSQ tables)
@@ -273,7 +290,7 @@ def station_report(coords, ch, stations_path, sep_km=2.0):
     return dict(out), order_ok
 
 
-def write_stations(stations_path, new_ch):
+def write_stations(stations_path, new_ch, river=rivers.DEFAULT):
     """Replace chainage_km in stations.csv with the snapped values (1 decimal, which
     matches their ~1 km uncertainty). Every other column, and the file's line
     endings, are kept as they were."""
@@ -282,7 +299,7 @@ def write_stations(stations_path, new_ch):
         rd = csv.DictReader(f)
         fields, rows = rd.fieldnames, list(rd)
     for r in rows:
-        if r["name"] in new_ch and rivers.norm(r.get("river")) == rivers.DEFAULT:
+        if r["name"] in new_ch and rivers.norm(r.get("river")) == river:
             r["chainage_km"] = f"{new_ch[r['name']]:.1f}"
     with open(stations_path, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, lineterminator=eol)
@@ -299,7 +316,11 @@ def main():
                     help="stations to snap and check (default: data/stations.csv)")
     ap.add_argument("--write-stations", action="store_true",
                     help="write the snapped chainage into stations.csv (review the report first)")
+    ap.add_argument("--river", default=rivers.DEFAULT, choices=[rivers.DEFAULT, *BRANCHES],
+                    help="build a branch's centreline instead of the Brisbane's")
     a = ap.parse_args()
+    if a.river != rivers.DEFAULT:
+        return main_branch(a, a.river)
 
     if a.fetch:
         fetch(RAW)
@@ -341,6 +362,79 @@ def main():
         if not order_ok:
             raise SystemExit("Not writing stations.csv: chainage order does not match the file.")
         write_stations(a.stations, new_ch)
+
+
+
+def main_branch(a, river):
+    """A branch's centreline: km 0 on the Brisbane centreline at the confluence, then up
+    the branch's watercourse line to max_km. Prints the Brisbane km at the confluence
+    (data/rivers.csv, confluence_km) and snaps the branch's stations."""
+    cfg = BRANCHES[river]
+    raw = cfg["raw"]
+    if a.fetch:
+        fetch(raw, cfg["name"], cfg["bbox"])
+    elif not raw.exists():
+        raise SystemExit(f"No saved download at {raw}. Run with --river {river} --fetch.")
+    print(f"Raw file SHA-256: {hashlib.sha256(raw.read_bytes()).hexdigest()}")
+
+    # The Brisbane centreline as drawn. Its km is the gauge-measured chainage everywhere;
+    # only the first ~1 km near the Bar was turned (v0.11.1), far from any confluence.
+    bris = list(csv.DictReader(open(OUT, newline="")))
+    bx, by = to_xy([float(r["lon"]) for r in bris], [float(r["lat"]) for r in bris])
+    bch = np.array([float(r["chainage_km"]) for r in bris])
+
+    lines = load_lines(raw)
+    adj = build_network(lines)
+    nodes = list(adj)
+    nx, ny = to_xy([n[0] for n in nodes], [n[1] for n in nodes])
+    # Confluence: the branch's network node nearest the Brisbane centreline.
+    near = [snap(px, py, bx, by, bch) for px, py in zip(nx, ny)]
+    dmin = np.array([d.min() for d, _ in near])
+    k = int(np.argmin(dmin))
+    start = nodes[k]
+    d, sch = near[k]
+    conf_km = float(sch[int(np.argmin(d))])
+    conf_lon, conf_lat = (float(np.interp(conf_km, bch, [float(r["lon"]) for r in bris])),
+                          float(np.interp(conf_km, bch, [float(r["lat"]) for r in bris])))
+    print(f"Confluence: branch line ends {dmin[k]*1000:.0f} m from the Brisbane centreline, "
+          f"at Brisbane km {conf_km:.2f} ({conf_lat:.6f}, {conf_lon:.6f})")
+
+    dist, prev = dijkstra(adj, start)
+    top = max(dist, key=dist.get)
+    used, coords, n = [], [], top
+    while n != start:
+        p, i, rev = prev[n]
+        seg = lines[i][::-1] if rev else lines[i]
+        used.append(i)
+        coords = seg[:-1] + coords if coords else seg
+        n = p
+    report_branches(lines, used)
+    coords = [(conf_lon, conf_lat)] + coords
+    ch = chainage(coords)
+    print(f"Path from the confluence to the far end of the download: {ch[-1]:.2f} km "
+          f"(top {top[0]:.5f}, {top[1]:.5f})")
+    if ch[-1] < cfg["max_km"]:
+        raise SystemExit(f"The download reaches only {ch[-1]:.1f} km up: widen bbox.")
+    # Cut at max_km, ending exactly there.
+    keep = int(np.searchsorted(ch, cfg["max_km"]))
+    end = (float(np.interp(cfg["max_km"], ch, [c[0] for c in coords])),
+           float(np.interp(cfg["max_km"], ch, [c[1] for c in coords])))
+    coords = coords[:keep] + [end]
+    ch = chainage(coords)
+    print(f"Centreline: {len(coords)} vertices, {ch[-1]:.2f} km confluence -> upstream end")
+    with open(cfg["out"], "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["lon", "lat", "chainage_km"])
+        for (lon, lat), c in zip(coords, ch):
+            w.writerow([f"{lon:.6f}", f"{lat:.6f}", f"{c:.4f}"])
+    print(f"Wrote {cfg['out']}")
+    print(f"data/rivers.csv row: {river},{cfg['name']},brisbane,{conf_km:.2f},{cfg['out'].name}")
+
+    new_ch, order_ok = station_report(coords, ch, a.stations, river=river)
+    if a.write_stations:
+        if not order_ok:
+            raise SystemExit("Not writing stations.csv: chainage order does not match the file.")
+        write_stations(a.stations, new_ch, river=river)
 
 
 if __name__ == "__main__":

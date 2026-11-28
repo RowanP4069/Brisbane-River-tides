@@ -14,6 +14,8 @@ Placeholders marked `TODO` are things I couldn't confirm from here. Fill them in
 | `observations.csv` | What field visits showed at those features (run running or drowned, water surface) | Field visits, with photos and videos kept privately |
 | `guesses.csv` | Named, dated guesses for the Guesswork (sandbox) page above Kholo Creek | The project's own guesses; not predictions |
 | `rivers.csv` | The rivers places can be on, and how a branch joins its parent | The project's own list (roadmap item 6) |
+| `qld_watercourse_bremer_river.geojson` | Bremer River segments of the same QLD watercourse lines layer, as downloaded | QLD Department of Resources spatial service |
+| `centreline_bremer.csv` | Bremer River centreline, km 0 at the confluence with the Brisbane, 30 km upstream | Derived by `build_centreline.py --river bremer` from the file above |
 
 ---
 
@@ -21,8 +23,8 @@ Placeholders marked `TODO` are things I couldn't confirm from here. Fill them in
 
 Added 2026-11-28 (roadmap item 6), ahead of the Bremer River branch (item 19). A place is a river and a km on that river's own centreline. The Brisbane River's km runs from the Bar gauge; a branch (a tributary of the Brisbane, such as the Bremer) will have km 0 at its confluence.
 
-- `rivers.csv`: one row per river. `river` is the id used everywhere else (lower case, e.g. `brisbane`), `name` the label shown on pages, `parent` and `confluence_km` (the parent's km at the confluence) blank for the Brisbane, `centreline` the file in this folder. Only `brisbane` so far.
-- `stations.csv`, `features.csv`, `observations.csv`, `ramps.csv` and `gauges.csv` have a `river` column just before their km column. Every row is `brisbane` so far.
+- `rivers.csv`: one row per river. `river` is the id used everywhere else (lower case, e.g. `brisbane`), `name` the label shown on pages, `parent` and `confluence_km` (the parent's km at the confluence) blank for the Brisbane, `centreline` the file in this folder. Rows: `brisbane`, and since 2026-11-28 `bremer` (item 19a: parent `brisbane`, confluence at Brisbane km 70.05, `centreline_bremer.csv`).
+- `stations.csv`, `features.csv`, `observations.csv`, `ramps.csv` and `gauges.csv` have a `river` column just before their km column. All `brisbane` except the Warrego Highway Bridge station (`bremer`, 2026-11-28).
 - Flow reports carry `river` too: the report page sends it inside the report's JSON (no extra Form question), and `collect_reports.py` writes it as a column of the reports CSV. Reports sent before 2026-11-28 have none, and are saved as `brisbane`.
 - A blank or missing `river` means `brisbane` everywhere, so older files and links keep their meaning. Every script uses only the Brisbane rows for now (`rivers.py`).
 - Links on the predictions page: `#YYYY-MM-DD/km2.5` is a place on the Brisbane, as before; a place on another river carries its id, `#YYYY-MM-DD/bremer/km3.1`. Until that river is built, such a link opens the day without a marked place.
@@ -160,6 +162,7 @@ This file is hand-built, not a copy of anything published, so record any change 
 - `ratio` is the height ratio relative to Brisbane Bar:
   - Pinkenba to Indooroopilly: the published ratio.
   - Stations marked `**` in the PDF (non-linear transfer, no ratio published): **derived** as the mean of the spring and neap range ratios against the Bar. The Bar values used were spring range 1.80 m and neap range 1.03 m. This is an estimate, and the spring and neap ratios diverge upriver (Moggill is about 1.14 vs 1.38).
+  - **Bremer River, Warrego Highway Bridge** (added 2026-11-28, roadmap item 19a; `river` = `bremer`): MSQ's only Bremer station, from the same table (2026 edition; 2027 identical). Position 27°35′ S 152°49′ E; HW +2:30, LW +2:55 (mean 162.5 min); MHWS 2.22, MHWN 1.87, MLWN 0.50, MLWS 0.26, MSL 1.21 m; `**`, no ratio published, so derived as above: spring (2.22 − 0.26) / 1.80 = 1.09, neap (1.87 − 0.50) / 1.03 = 1.33, mean 1.21. `chainage_km` is km along the Bremer centreline from the confluence: the Warrego Highway (M2) bridge crosses the river at Bremer km 5.26 (OpenStreetMap), and MSQ's arc-minute position snaps to 5.35, so 5.3. Between the confluence (Brisbane km 70.05, where the Brisbane's interpolated values are used: lag 149.6 min, ratio 1.258, MSL 1.252) and the bridge, `river_tides.py` interpolates linearly along the Bremer. Above the bridge (Ipswich, km 16.7 at the David Trumpy Bridge) there are no published figures, so no prediction (the 14 Nov rule).
   - Reviewed 2026-11-07 (v0.3.0): the spring-only range ratio was considered and rejected. It is exact at springs but understates neap swings by up to ~22 % (Kholo); the mean is within about ±12 % in both regimes. A ratio that varies with the Bar's current range is a candidate v0.4 item.
 - `msl_m` is mean sea level from the same table, in metres above the station's **own** local LAT. Added in v0.3.0 for the absolute-height baseline.
 - `range_m` is the spring range, MHWS − MLWS, from the same table. Added in v0.3.0 as a reference column; the script does not use it for the ratio.
@@ -217,6 +220,26 @@ This file is hand-built, not a copy of anything published, so record any change 
 **Processing**
 
 None. Stored exactly as returned. All processing happens in `build_centreline.py`.
+
+---
+
+## `qld_watercourse_bremer_river.geojson`
+
+**Source**
+
+- The same layer as `qld_watercourse_brisbane_river.geojson` (same licence and attribution), downloaded by `build_centreline.py --river bremer --fetch` with the query `name='Bremer River'` inside the box 152.55–152.90 E, -27.75 to -27.54.
+- Retrieved: 2026-11-28.
+- SHA-256: `440f0ada50ce241e0e4c44262d3e79c16ff117f29d7cafa8704d8e8499d5a091`. Size 156,105 bytes. 205 line features (Watercourse and Connector).
+
+**Processing**
+
+None. Stored exactly as returned.
+
+---
+
+## `centreline_bremer.csv`
+
+Derived by `build_centreline.py --river bremer`: the shortest path through the Bremer segments from the node nearest the Brisbane centreline (the line ends on it, 0 m away) upstream, cut at 30 km (enough for the MSQ station at km 5.3 and for flow reports, item 19b; not to the source). km 0 is the confluence, at Brisbane km 70.05 (-27.583172, 152.855467), between Moggill Ferry (68.6) and Kholo Creek (75.8). 203 of 205 segments used (1.27 km of side channels left out). Columns as `centreline.csv`.
 
 ---
 

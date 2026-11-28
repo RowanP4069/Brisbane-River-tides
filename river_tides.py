@@ -158,6 +158,30 @@ def add_corrections(pts, st):
     return pts
 
 
+def branch_points(river, st_parent, stations_path, spacing_km):
+    """Model points along a branch of the Brisbane (roadmap item 19), km 0 at the
+    confluence, up to the branch's last MSQ station (the 14 Nov rule: no prediction
+    above it). Returns (points, the branch's stations, its centreline path).
+
+    ASSUMPTION: lag, ratio and MSL vary linearly along the branch from the parent's
+    values at the confluence (interpolated along the parent as usual) to the branch's
+    stations. For the Bremer that is Brisbane km 70.05 (lag ~150 min) to Warrego
+    Highway Bridge, Bremer km 5.3 (162.5 min, derived ratio 1.21, MSL 1.21).
+    """
+    row = rivers.load()[river]
+    conf_km = float(row["confluence_km"])
+    bst = load_stations(stations_path, river=river)
+    if bst.empty:
+        raise SystemExit(f"{river}: no complete stations in {stations_path}")
+    conf = {"name": f"Confluence (Brisbane km {conf_km:g})", "chainage_km": 0.0}
+    conf.update({c: float(np.interp(conf_km, st_parent.chainage_km, st_parent[c]))
+                 for c in ["lag_min", "ratio", "msl_m"]})
+    table = pd.concat([pd.DataFrame([conf]), bst[list(conf)]], ignore_index=True)
+    path = DATA / row["centreline"]
+    pts = add_corrections(sample_centreline(path, spacing_km, float(bst.chainage_km.max())), table)
+    return pts, bst, path
+
+
 def heights(bar, frames, pts, bar_msl):
     """Absolute height (m above local LAT) as a 2-D array [frame, point].
 
@@ -232,7 +256,7 @@ def ramp_places(path, end_km):
 
 
 def build_payload(frames, pts, h, bar_msl, step_min, stations, full_bar, hours,
-                  start_is_default, built=None, ramps=()):
+                  start_is_default, built=None, ramps=(), river_list=None):
     """Everything the page needs, as plain lists (JSON-ready). Becomes DATA in the page.
 
     The page computes heights itself for whichever day the viewer picks, from "model":
@@ -249,6 +273,9 @@ def build_payload(frames, pts, h, bar_msl, step_min, stations, full_bar, hours,
     built: when the page was made, as a naive AEST Timestamp, or None to leave the
     stamp out (the default, so repeat runs give byte-identical output).
     ramps: boat ramps for the page's Place list (see ramp_places).
+    river_list: the rivers drawn, Brisbane first (item 19). pts holds every river's
+    points, Brisbane's first; pts.river is the index into river_list, pts.chainage_km
+    the km on that river, pts.path_km the distance from the Bar along the profile path.
 
     Rounding in "points" (for display): chainage to 1 m, lon/lat to 6 decimals (~0.1 m),
     lag to 0.1 min, ratio to 4 decimals; "heights" to 1 mm. Finer than the model's
@@ -292,8 +319,12 @@ def build_payload(frames, pts, h, bar_msl, step_min, stations, full_bar, hours,
         "times": [t.strftime("%Y-%m-%dT%H:%M") for t in frames],
         "stations": stations,
         "ramps": list(ramps),
+        "rivers": river_list or [{"id": "brisbane", "name": "Brisbane River",
+                                  "confluence_km": None}],
         "points": {
             "chainage_km": pts.chainage_km.round(3).tolist(),
+            "river": (pts.river if "river" in pts else pd.Series(0, index=pts.index)).astype(int).tolist(),
+            "path_km": (pts.path_km if "path_km" in pts else pts.chainage_km).round(3).tolist(),
             "lon": pts.lon.round(6).tolist(),
             "lat": pts.lat.round(6).tolist(),
             "lag_min": pts.lag_min.round(1).tolist(),
@@ -544,6 +575,26 @@ def main():
     pts = add_corrections(pts, st)
     if args.sandbox:
         pts = apply_guess_lag_ratio(pts, guesses, kholo_km)
+    bris_end_km = float(pts.chainage_km.max())
+    labels = [dict(s, river=0, path_km=s["chainage_km"]) for s in station_labels(st, args.centreline)]
+    river_list = [{"id": rivers.DEFAULT, "name": rivers.load()[rivers.DEFAULT]["name"],
+                   "confluence_km": None}]
+    pts["river"], pts["path_km"] = 0, pts.chainage_km
+    # Branches of the Brisbane (item 19), after its points so their indices are
+    # unchanged. Not on the Guesswork page, which is about Kholo to the weir ruin.
+    if not args.sandbox:
+        for rid, row in rivers.load().items():
+            if row["parent"] != rivers.DEFAULT:
+                continue
+            bpts, bst, bpath = branch_points(rid, st, args.stations, args.spacing_km)
+            conf_km = float(row["confluence_km"])
+            bpts["river"], bpts["path_km"] = len(river_list), conf_km + bpts.chainage_km
+            labels += [dict(s, river=len(river_list), path_km=round(conf_km + s["chainage_km"], 2))
+                       for s in station_labels(bst, bpath)]
+            river_list.append({"id": rid, "name": row["name"], "confluence_km": conf_km})
+            pts = pd.concat([pts, bpts], ignore_index=True)
+            print(f"{row['name']}: {len(bpts)} points to km {bpts.chainage_km.max():g}, "
+                  f"lag {bpts.lag_min.iloc[0]:.1f} to {bpts.lag_min.iloc[-1]:.1f} min")
     h = heights(bar, frames, pts, bar_msl)
 
     print(f"{len(frames)} frames x {len(pts)} points, "
@@ -552,9 +603,9 @@ def main():
 
     built = pd.Timestamp.now(tz=BRISBANE).tz_localize(None) if args.stamp else None
     payload = build_payload(frames, pts, h, bar_msl, args.step_min,
-                            station_labels(st, args.centreline), full, args.hours,
+                            labels, full, args.hours,
                             start_is_default, built,
-                            ramp_places(args.ramps, pts.chainage_km.max()))
+                            ramp_places(args.ramps, bris_end_km), river_list)
     if args.sandbox:
         obs = rivers.only(pd.read_csv(DATA / "observations.csv", dtype=str).fillna(""))
         payload["sandbox"] = sandbox_block(guesses, features, obs, kholo_km, end_km)

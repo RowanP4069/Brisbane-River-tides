@@ -83,7 +83,7 @@
   <nav class="pages"><a href="index.html" aria-current="page">Height predictions</a><a href="gauges.html">Gauges (measured)</a><a href="compare.html">Measured vs predicted</a><a href="report.html">Report the flow</a><a href="results.html">Report the flow (results)</a><a href="guesswork.html" title="Guesswork: Kholo Creek to the weir ruin (sandbox)">Guesses</a></nav>
   <p id="sandboxBanner" hidden>Sandbox. Guesses, not predictions. Above Kholo Creek every height here comes
     from a named, dated guess (listed at the bottom of the page), not from published tide figures.</p>
-  <h1 id="title">Brisbane River tide height predictions: Brisbane Bar to Kholo Creek</h1>
+  <h1 id="title">Brisbane River tide height predictions: Brisbane Bar to Kholo Creek, and up the Bremer River to Warrego Highway Bridge</h1>
   <span class="sub" id="subtitle"></span>
 </header>
 
@@ -139,6 +139,9 @@
     </label>
     <button id="markClear" type="button" title="Clear the marked place" aria-label="Clear the marked place" hidden>×</button>
   </span>
+  <label id="pathBox" hidden>Profile
+    <select id="path" aria-label="River shown on the profile"></select>
+  </label>
   <span id="markInfo"></span>
 </div>
 <!-- Key to the profile below; the window length is filled in by renderSubtitle(). -->
@@ -188,6 +191,21 @@
 const DATA = /*__DATA__*/null;
 
 const P = DATA.points, NP = P.chainage_km.length;
+// Rivers (roadmap item 19). P holds every river's points, the Brisbane's first, each
+// river's in order going upstream. P.river[p] is an index into DATA.rivers,
+// P.chainage_km[p] the km on that river (a branch's km 0 is its confluence), and
+// P.path_km[p] the distance from the Bar along the river's profile path. The map shows
+// every river; the profile shows one path: the Brisbane, or the Brisbane up to a
+// branch's confluence and then up the branch.
+const RIVERS = DATA.rivers, PX = P.path_km;
+const PATHS = RIVERS.map((rv, ri) => P.river.flatMap((r, p) =>
+  r === ri || (ri > 0 && r === 0 && P.chainage_km[p] <= rv.confluence_km + 1e-9) ? [p] : []));
+// Neighbours on the same river (one-sided at a river's ends), for the surface slope.
+const PREV = P.river.map((r, p) => p > 0 && P.river[p - 1] === r ? p - 1 : p);
+const NEXT = P.river.map((r, p) => p < NP - 1 && P.river[p + 1] === r ? p + 1 : p);
+// "Bremer River km 2.5", or "km 40" on the Brisbane.
+const riverPrefix = ri => ri ? RIVERS[ri].name + " " : "";
+const riverMaxKm = ri => Math.max(...P.chainage_km.filter((_, p) => P.river[p] === ri));
 const STEP_MIN = DATA.meta.step_min, dtHours = STEP_MIN / 60;
 
 // ---- Model: BEGIN (check_parity.py runs this block in Node, so keep it self-contained:
@@ -328,7 +346,7 @@ function setWindow(startMs, hours) {
   // x increases upstream, so a surface falling upstream (dA/dx < 0) pushes water upstream.
   // Positive = pushes upstream (flood-ish), negative = pushes downstream (ebb-ish).
   slope = H.map(row => row.map((_, p) => {
-    const a = Math.max(0, p - 1), b = Math.min(NP - 1, p + 1);
+    const a = PREV[p], b = NEXT[p];         // same river only (item 19)
     const dA = (row[b] - P.msl_m[b]) - (row[a] - P.msl_m[a]);
     const dx = P.chainage_km[b] - P.chainage_km[a];
     return -1000 * dA / dx;
@@ -410,6 +428,7 @@ const $ = id => document.getElementById(id);
 // mark came from the Place list (or a link to that place's km), else null.
 const state = { frame: 0, colour: "dir", base: "lat", exag: +$("exag").value, playing: false,
                 day: 0, hours: 48, mark: null, markPlace: null };
+state.path = 0;                     // the profile's path: an index into DATA.rivers
 const slider = $("slider");
 
 // Window length: the 24/48 h choices, plus river_tides.py --hours if it's another value.
@@ -424,7 +443,7 @@ hoursSel.value = String(DATA.meta.hours);
 // #2026-11-17/bremer/km3.1 (item 6); a Brisbane place is written without one, so old
 // links keep working. Either part may be missing or invalid (then NaN); a place on a
 // river this page doesn't draw is ignored (the day still opens).
-const PAGE_RIVERS = ["brisbane"];
+const PAGE_RIVERS = RIVERS.map(rv => rv.id);
 function parseHash() {
   const parts = location.hash.slice(1).split("/");
   const d = parts[0] || "";
@@ -436,7 +455,7 @@ function parseHash() {
 // Opening day: from the address if valid; else river_tides.py --start if one was given;
 // else today in Brisbane. Moved into range if needed.
 // Read the marked place now too: setting up the window rewrites the address.
-const { day: hashDay, km: hashKm } = parseHash();
+const { day: hashDay, km: hashKm, river: hashRiver } = parseHash();
 state.day = clampDay(!isNaN(hashDay) ? hashDay
   : DATA.meta.start_is_default ? brisbaneToday() : isoMs(DATA.meta.start) - TOD_MS, state.hours);
 setWindow(state.day + TOD_MS, state.hours);
@@ -649,7 +668,7 @@ function tipText(f, p) {
       + guessText(f, p) + "\n"
       + `rate ${rate[f][p] >= 0 ? "+" : ""}${rate[f][p].toFixed(2)} m/h`;
   }
-  return `km ${P.chainage_km[p].toFixed(1)}  (lag ${P.lag_min[p].toFixed(0)} min, ratio ${P.ratio[p].toFixed(2)})\n`
+  return `${riverPrefix(P.river[p])}km ${P.chainage_km[p].toFixed(1)}  (lag ${P.lag_min[p].toFixed(0)} min, ratio ${P.ratio[p].toFixed(2)})\n`
     + `${H[f][p].toFixed(2)} m above local LAT   ${(H[f][p] - P.msl_m[p]).toFixed(2)} m vs MSL\n`
     + `rate ${rate[f][p] >= 0 ? "+" : ""}${rate[f][p].toFixed(2)} m/h   slope ${slope[f][p] >= 0 ? "+" : ""}${slope[f][p].toFixed(0)} mm/km`;
 }
@@ -657,7 +676,13 @@ function tipText(f, p) {
 // ---- Profile (canvas) --------------------------------------------------------------
 const cv = $("profile"), ctx = cv.getContext("2d"), ptip = $("ptip");
 const FONT = "11px system-ui, sans-serif";
-const KM_MAX = P.chainage_km[NP - 1];
+const KM_MAX = riverMaxKm(0);               // the Brisbane's last point
+// The profile's x axis runs to the end of the current path.
+const pathMax = () => Math.max(...PATHS[state.path].map(p => PX[p]));
+// A labelled place (station or sandbox feature) is on the current path if it is on the
+// path's river, or on the Brisbane below the path's confluence.
+const onPath = s => (s.river || 0) === state.path || (!(s.river || 0)
+  && (state.path === 0 || s.chainage_km <= RIVERS[state.path].confluence_km + 1e-9));
 
 // Station names under the x axis are drawn tilted LABEL_ANGLE radians (~34 deg), hanging
 // down-left from their tick, with the text starting LABEL_DROP px below the axis.
@@ -683,11 +708,12 @@ function sizeCanvas() {
 function drawProfile() {
   const r = cv.getBoundingClientRect(), W = r.width, Ht = r.height;
   const base = BASES[state.base], f = state.frame;
+  const PT = PATHS[state.path], XMAX = pathMax();
   // y axis: from floor to max, rounded outwards to the nearest 0.5 m (the gridline step).
   const yLo = Math.floor(base.floor * 2) / 2, yHi = Math.ceil(base.max * 2) / 2;
   // km runs RIGHT TO LEFT: Brisbane Bar (km 0) on the right, upstream on the left,
   // matching the map, where the river mouth is east (right) and upstream is west.
-  const X = km => PAD.l + (1 - km / KM_MAX) * (W - PAD.l - PAD.r);
+  const X = km => PAD.l + (1 - km / XMAX) * (W - PAD.l - PAD.r);
   const Y = v => PAD.t + (1 - (v - yLo) / (yHi - yLo)) * (Ht - PAD.t - PAD.b);
   ctx.clearRect(0, 0, W, Ht);
   ctx.font = FONT;              // set every draw: resizing the canvas resets the context
@@ -697,6 +723,14 @@ function drawProfile() {
   ctx.fillRect(X(LAG_REVERSED[0]), PAD.t, X(LAG_REVERSED[1]) - X(LAG_REVERSED[0]), Ht - PAD.t - PAD.b);
   ctx.fillStyle = "#8a4b00"; ctx.textAlign = "center";
   ctx.fillText("lag reversed", X((LAG_REVERSED[0] + LAG_REVERSED[1]) / 2), PAD.t + 10);
+  // A branch's path: a dashed line at the confluence; the branch is to its left.
+  if (state.path > 0) {
+    const xc = X(RIVERS[state.path].confluence_km);
+    ctx.strokeStyle = "#5d6873"; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(xc, PAD.t); ctx.lineTo(xc, Ht - PAD.b); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "#5d6873"; ctx.textAlign = "left";
+    ctx.fillText(`\u2190 ${RIVERS[state.path].name} | Brisbane River \u2192 (confluence)`, xc + 4, PAD.t + 24);
+  }
   // Sandbox: the guess reach, Kholo Creek to the weir ruin.
   if (SB) {
     ctx.fillStyle = "rgba(240,200,110,.18)";
@@ -719,19 +753,19 @@ function drawProfile() {
   // Envelope over the window: a band from each point's lowest to highest value
   // (precomputed per baseline). Along the top left to right, back along the bottom.
   ctx.fillStyle = "rgba(31,111,178,.2)"; ctx.beginPath();
-  for (let p = 0; p < NP; p++) {
-    const x = X(P.chainage_km[p]), y = Y(base.envHi[p]);
-    p ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-  }
-  for (let p = NP - 1; p >= 0; p--) ctx.lineTo(X(P.chainage_km[p]), Y(base.envLo[p]));
+  PT.forEach((p, j) => {
+    const x = X(PX[p]), y = Y(base.envHi[p]);
+    j ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  for (let j = PT.length - 1; j >= 0; j--) ctx.lineTo(X(PX[PT[j]]), Y(base.envLo[PT[j]]));
   ctx.closePath(); ctx.fill();
 
   // Current frame: one bar per point from the zero line, same colours as the map.
   // Each bar is 80 % of the point spacing wide (at least 1 px), and at least 1 px tall
   // ("|| 1") so a point at exactly zero still shows its colour.
   const bw = Math.max(1, Math.abs(X(P.chainage_km[1]) - X(0)) * 0.8);
-  for (let p = 0; p < NP; p++) {
-    const v = base.f(f, p), x = X(P.chainage_km[p]);
+  for (const p of PT) {
+    const v = base.f(f, p), x = X(PX[p]);
     const rect = [x - bw / 2, Math.min(Y(v), Y(0)), bw, Math.abs(Y(v) - Y(0)) || 1];
     ctx.fillStyle = css(barColour(f, p));
     ctx.fillRect(...rect);
@@ -756,7 +790,7 @@ function drawProfile() {
   // solid, lowest dashed, each on a white halo so it shows on red and blue bars alike.
   const edge = (vals, dash) => {
     ctx.beginPath();
-    for (let p = 0; p < NP; p++) { const x = X(P.chainage_km[p]), y = Y(vals[p]); p ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    PT.forEach((p, j) => { const x = X(PX[p]), y = Y(vals[p]); j ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.setLineDash(dash);
     ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.lineWidth = 4; ctx.stroke();
     ctx.strokeStyle = "#174f80"; ctx.lineWidth = 2; ctx.stroke();
@@ -767,14 +801,14 @@ function drawProfile() {
 
   // Water-level line on top
   ctx.strokeStyle = "#1d2329"; ctx.lineWidth = 1.5; ctx.beginPath();
-  for (let p = 0; p < NP; p++) { const x = X(P.chainage_km[p]), y = Y(base.f(f, p)); p ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  PT.forEach((p, j) => { const x = X(PX[p]), y = Y(base.f(f, p)); j ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
   ctx.stroke();
 
   if (SB) drawObservations(X, Y, base, Ht);
 
   // Marked place: a vertical line, with a handle (a small triangle) in the top margin.
-  if (state.mark != null) {
-    const x = X(P.chainage_km[state.mark]);
+  if (state.mark != null && PT.includes(state.mark)) {
+    const x = X(PX[state.mark]);
     ctx.strokeStyle = MARK_CSS; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(x, PAD.t); ctx.lineTo(x, Ht - PAD.b); ctx.stroke();
     ctx.fillStyle = MARK_CSS; ctx.beginPath();
@@ -783,15 +817,16 @@ function drawProfile() {
 
   // x axis: km ticks every 10 km above the station names
   ctx.fillStyle = "#5d6873"; ctx.strokeStyle = "#9aa4ad"; ctx.lineWidth = 1; ctx.textAlign = "center";
-  for (let km = 10; km <= KM_MAX; km += 10) ctx.fillText(km, X(km), Ht - PAD.b + 12);
+  for (let km = 10; km <= XMAX; km += 10) ctx.fillText(km, X(km), Ht - PAD.b + 12);
   ctx.textAlign = "right"; ctx.fillText("0 km", X(0) + 4, Ht - PAD.b + 12);   // at the right edge
   // Station names, tilted so close neighbours (Tennyson/Indooroopilly, Moggill/Kholo)
   // don't collide. Every station gets a tick; a name too close to the previous one
   // drawn is skipped (only happens on narrow screens).
   // Left to right across the screen (upstream first), so the skip rule below works.
   let lastNameX = -Infinity;
-  for (const s of [...LABELLED].sort((a, b) => b.chainage_km - a.chainage_km)) {
-    const x = X(s.chainage_km);
+  const sx = s => s.path_km ?? s.chainage_km;            // sandbox features: Brisbane km
+  for (const s of LABELLED.filter(onPath).sort((a, b) => sx(b) - sx(a))) {
+    const x = X(sx(s));
     ctx.beginPath(); ctx.moveTo(x, Ht - PAD.b); ctx.lineTo(x, Ht - PAD.b + 3); ctx.stroke();
     if (x - lastNameX < MIN_LABEL_GAP_PX) continue;
     lastNameX = x;
@@ -957,12 +992,18 @@ const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 // km under the pointer (the axis runs right to left).
 function kmAtPointer(e) {
   const r = cv.getBoundingClientRect();
-  return (1 - (e.clientX - r.left - PAD.l) / (r.width - PAD.l - PAD.r)) * KM_MAX;
+  return (1 - (e.clientX - r.left - PAD.l) / (r.width - PAD.l - PAD.r)) * pathMax();
+}
+// The point on the current path nearest a distance from the Bar.
+function nearestOnPath(x) {
+  let p = 0, best = Infinity;
+  for (const i of PATHS[state.path]) { const d = Math.abs(PX[i] - x); if (d < best) { best = d; p = i; } }
+  return p;
 }
 function showProfileTip(e) {
   const r = cv.getBoundingClientRect(), x = e.clientX - r.left, km = kmAtPointer(e);
-  if (km < 0 || km > KM_MAX) { ptip.style.display = "none"; return; }
-  const p = nearestPoint(km);
+  if (km < 0 || km > pathMax()) { ptip.style.display = "none"; return; }
+  const p = nearestOnPath(km);
   ptip.textContent = tipText(state.frame, p).replace(/\n/g, "  ·  ");
   ptip.style.display = "block";
   ptip.style.left = Math.max(4, Math.min(x + 12, r.width - ptip.offsetWidth - 4)) + "px"; ptip.style.top = "6px";
@@ -972,15 +1013,15 @@ function showProfileTip(e) {
 let draggingMark = false;
 cv.addEventListener("pointerdown", e => {
   const km = kmAtPointer(e);
-  if (km >= 0 && km <= KM_MAX) {
+  if (km >= 0 && km <= pathMax()) {
     draggingMark = true; cv.setPointerCapture(e.pointerId);
-    setMark(nearestPoint(km));
+    setMark(nearestOnPath(km));
   }
   showProfileTip(e);
 });
 cv.addEventListener("pointermove", e => {
   if (draggingMark) {
-    const p = nearestPoint(Math.max(0, Math.min(KM_MAX, kmAtPointer(e))));
+    const p = nearestOnPath(Math.max(0, Math.min(pathMax(), kmAtPointer(e))));
     if (p !== state.mark || state.markPlace != null) setMark(p);
   }
   showProfileTip(e);
@@ -1012,28 +1053,35 @@ $("exag").addEventListener("input", e => { state.exag = +e.target.value; update(
 // link (#YYYY-MM-DD/km2.5). It snaps to the nearest model point, so the readout shows
 // the model's own values there; a ramp keeps its own km in the label and the link.
 const PLACES = [
-  ...DATA.stations.map(s => ({ name: s.name, km: s.chainage_km, group: "Tide stations (MSQ)" })),
-  ...(DATA.ramps || []).map(r => ({ name: r.name, km: r.chainage_km, group: "Boat ramps" })),
-  ...(SB ? SB.places : []).map(f => ({ name: f.name, km: f.chainage_km, group: "Above Kholo Creek (features)" })),
+  ...DATA.stations.map(s => ({ name: s.name, km: s.chainage_km, river: s.river || 0, group: "Tide stations (MSQ)" })),
+  ...(DATA.ramps || []).map(r => ({ name: r.name, km: r.chainage_km, river: 0, group: "Boat ramps" })),
+  ...(SB ? SB.places : []).map(f => ({ name: f.name, km: f.chainage_km, river: 0, group: "Above Kholo Creek (features)" })),
 ];
 const placeSel = $("place");
 for (const g of [...new Set(PLACES.map(pl => pl.group))]) {
   const og = document.createElement("optgroup"); og.label = g;
-  PLACES.forEach((pl, i) => { if (pl.group === g) og.append(new Option(`${pl.name} (km ${fmtKm(pl.km)})`, i)); });
+  PLACES.forEach((pl, i) => { if (pl.group === g) og.append(new Option(`${pl.name} (${riverPrefix(pl.river)}km ${fmtKm(pl.km)})`, i)); });
   placeSel.append(og);
 }
 function fmtKm(km) { return String(+km.toFixed(2)); }          // 2.5, 9.34, 0
-function nearestPoint(km) {
+function nearestPoint(km, river = 0) {
   let p = 0, best = Infinity;               // a plain search; NP is small
-  for (let i = 0; i < NP; i++) { const d = Math.abs(P.chainage_km[i] - km); if (d < best) { best = d; p = i; } }
+  for (let i = 0; i < NP; i++) {
+    if (P.river[i] !== river) continue;
+    const d = Math.abs(P.chainage_km[i] - km); if (d < best) { best = d; p = i; }
+  }
   return p;
 }
 const markKm = () => state.markPlace != null ? PLACES[state.markPlace].km : P.chainage_km[state.mark];
 function writeHash() {
-  const h = "#" + dayText(state.day) + (state.mark != null ? "/km" + fmtKm(markKm()) : "");
+  // A place on a branch carries the river's id (#YYYY-MM-DD/bremer/km3.1, item 6).
+  const r = state.mark != null ? P.river[state.mark] : 0;
+  const h = "#" + dayText(state.day) + (state.mark != null ? (r ? "/" + RIVERS[r].id : "") + "/km" + fmtKm(markKm()) : "");
   if (location.hash !== h) history.replaceState(null, "", h);
 }
 function setMark(p, placeIdx = null) {
+  // A place off the profile's path switches the profile to that place's river.
+  if (p != null && !PATHS[state.path].includes(p)) setPath(P.river[p], false);
   state.mark = p; state.markPlace = p == null ? null : placeIdx;
   placeSel.value = state.markPlace != null ? String(state.markPlace) : "";
   $("markClear").hidden = p == null;
@@ -1041,15 +1089,26 @@ function setMark(p, placeIdx = null) {
   if (map) layoutCallouts();
 }
 // From a km (e.g. the address): a place whose km matches keeps its name.
-function markAtKm(km) {
-  if (!(km >= 0 && km <= KM_MAX + 0.25)) return false;
-  const i = PLACES.findIndex(pl => Math.abs(pl.km - km) < 0.005);
-  setMark(nearestPoint(km), i >= 0 ? i : null);
+function markAtKm(km, river = 0) {
+  if (!(river >= 0 && km >= 0 && km <= riverMaxKm(river) + 0.25)) return false;
+  const i = PLACES.findIndex(pl => pl.river === river && Math.abs(pl.km - km) < 0.005);
+  setMark(nearestPoint(km, river), i >= 0 ? i : null);
   return true;
 }
 placeSel.addEventListener("change", () => {
   const i = placeSel.value === "" ? null : +placeSel.value;
-  if (i == null) setMark(null); else setMark(nearestPoint(PLACES[i].km), i);
+  if (i == null) setMark(null); else setMark(nearestPoint(PLACES[i].km, PLACES[i].river), i);
+});
+// Profile path (item 19): shown only when there is more than one river.
+const pathSel = $("path");
+RIVERS.forEach((rv, i) => pathSel.add(new Option(rv.name, i)));
+$("pathBox").hidden = RIVERS.length < 2;
+function setPath(i, redraw = true) {
+  state.path = i; pathSel.value = String(i);
+  if (redraw) update();
+}
+pathSel.addEventListener("change", () => {
+  setPath(+pathSel.value);
 });
 $("markClear").addEventListener("click", () => setMark(null));
 // "Mon 14:10" from "YYYY-MM-DDTHH:MM" (weekday from the date, as in fmtTime).
@@ -1061,7 +1120,8 @@ function markText() {
   if (p == null) return "";
   const esc = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const pl = state.markPlace != null ? PLACES[state.markPlace] : null;
-  const where = pl ? `${esc(pl.name)}, km ${fmtKm(pl.km)}` : `km ${fmtKm(P.chainage_km[p])}`;
+  const where = pl ? `${esc(pl.name)}, ${riverPrefix(pl.river)}km ${fmtKm(pl.km)}`
+    : `${riverPrefix(P.river[p])}km ${fmtKm(P.chainage_km[p])}`;
   const r = rate[state.frame][p];
   const trend = r > SLACK_M_PER_H ? `rising ${r.toFixed(2)} m/h`
     : r < -SLACK_M_PER_H ? `falling ${(-r).toFixed(2)} m/h` : "near slack";
@@ -1109,9 +1169,12 @@ dateInput.addEventListener("change", () => {
 });
 hoursSel.addEventListener("change", () => applyWindow(state.day, +hoursSel.value));
 window.addEventListener("hashchange", () => {
-  const { day: d, km } = parseHash();
+  const { day: d, km, river } = parseHash();
+  const ri = PAGE_RIVERS.indexOf(river);
   if (!isNaN(d) && d !== state.day) applyWindow(d, state.hours);
-  if (!isNaN(km)) { if (state.mark == null || Math.abs(km - markKm()) > 0.005) markAtKm(km); }
+  if (!isNaN(km)) {
+    if (state.mark == null || P.river[state.mark] !== ri || Math.abs(km - markKm()) > 0.005) markAtKm(km, ri);
+  }
   else if (state.mark != null) setMark(null);
 });
 
@@ -1170,7 +1233,7 @@ window.addEventListener("resize", () => { sizeCanvas(); drawProfile(); });
 
 if (SB) { renderGuessList(); if (SB.head) renderHeadChart(); }
 sizeCanvas(); applyWindow(state.day, state.hours);
-markAtKm(hashKm);                           // a marked place from the address, if any
+markAtKm(hashKm, PAGE_RIVERS.indexOf(hashRiver));   // a marked place from the address, if any
 </script>
 </body>
 </html>

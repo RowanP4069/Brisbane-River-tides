@@ -1,6 +1,6 @@
 # Brisbane River tides
 
-Interactive pages that show the **predicted tide** along the Brisbane River, from the Brisbane Bar to Kholo Creek, for any day in 2026 and 2027, alongside what the river actually did and what people on the water saw. It's a personal hobby project, made by a kayaker who wanted to see when the tide turns along different reaches of the river.
+Interactive pages that show the **predicted tide** along the Brisbane River, from the Brisbane Bar to Kholo Creek (and up the Bremer River to Warrego Highway Bridge), for any day in 2026 and 2027, alongside what the river actually did and what people on the water saw. It's a personal hobby project, made by a kayaker who wanted to see when the tide turns along different reaches of the river.
 
 **Open the site: <https://rowanp4069.github.io/Brisbane-River-tides/>** It opens on today in Brisbane. Pick another day with the ◀ ▶ buttons or the calendar, and share a day with a link such as `…/Brisbane-River-tides/#2026-12-25`.
 
@@ -45,6 +45,7 @@ All the pages share a link bar at the top. The site is rebuilt every night and a
 ### What it shows
 
 - **3D map:** a bar every 500 m along the river. Bar height is the predicted water level, and the colour shows whether it's rising or falling (or the rate of change, or a surface-slope proxy).
+- **Bremer River** (since 2026-11-28): bars also run up the Bremer from its confluence (Brisbane km 70.05) to Warrego Highway Bridge (Bremer km 5.3), MSQ's only Bremer station; Ipswich is above it, so it has no prediction. The **Profile** list picks which river the profile follows: the Brisbane, or the Brisbane to the confluence and then up the Bremer. Places on the Bremer are written as Bremer km, and links carry the river (`…/#2026-12-25/bremer/km3`).
 - **Profile:** the same data along the river as a chart. A shaded band shows the range at each point over the whole 24 h or 48 h window: its top line (solid) is the highest level there, its bottom line (dashed) the lowest. Each point reaches its highest at a different time (the tide arrives later upstream), so the top line is not the river at any one moment.
 - **Marked place:** tap or drag on the profile, click a bar on the map, or pick a tide station or boat ramp from the **Place** list. The place gets a purple line on the profile and a purple ring and label on the map, and a readout of its height now, whether it's rising or falling, and its highest and lowest in the window with their times. It snaps to the nearest 500 m point, and goes in the address too (e.g. `…/#2026-12-25/km2.5`) so a link opens on the same day and place.
 - **Day:** ◀ ▶ for the previous or next day, a date box with a calendar, **Today**, and a 24 h or 48 h window. Changing day keeps the same time of day, and the day goes in the address so a link opens on it.
@@ -161,7 +162,7 @@ Useful `river_tides.py` options (`--help` lists them all; each script has its ow
 Other tools:
 
 - `check_parity.py` checks that the page and Python agree to within the 1 mm rounding, over a set of test days; run it after changing the model on either side (it needs Node.js). It also checks that the Measured vs predicted page's statistics match `compare_gauges.py`. The site build stops if it fails.
-- `build_centreline.py` rebuilds `data/centreline.csv` from the saved watercourse data. You only need it if that data or the station positions change.
+- `build_centreline.py` rebuilds `data/centreline.csv` from the saved watercourse data (`--river bremer`: `data/centreline_bremer.csv`). You only need it if that data or the station positions change.
 - `fetch_bar.py --year YYYY` fetches a year of Brisbane Bar predictions from data.qld.gov.au.
 
 ## Run your own copy (fork)
