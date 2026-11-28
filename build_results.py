@@ -27,7 +27,8 @@ import numpy as np
 import pandas as pd
 
 from build_report import REPORT_KM_MAX, REPORTS_REF
-from river_tides import BRISBANE, DATA, HERE, load_bars, load_stations, station_labels, to_json, write_html
+from river_tides import (BRISBANE, DATA, HERE, load_bars, load_stations, station_labels, station_table,
+                         to_json, write_html)
 import rivers
 
 TURN_MIN = 45              # as the report page: within this of high/low water = "near the turn"
@@ -45,9 +46,11 @@ H1 = {"id": "H1", "from_km": 75.8, "to_km": 83.81, "base_min": 150, "lo_per_km":
 # --- The model, as the report page's heightAt() and tideState() --------------------
 
 class Model:
-    def __init__(self, st, bar):
+    def __init__(self, st, bar, bar_msl=None):
         self.st = st
-        self.bar_msl = float(st.loc[st.chainage_km == 0, "msl_m"].iloc[0])
+        # A branch's table starts at its confluence (river_tides.station_table), so its
+        # km 0 row is not the Bar: pass the Bar's MSL in (item 19c).
+        self.bar_msl = bar_msl if bar_msl is not None else float(st.loc[st.chainage_km == 0, "msl_m"].iloc[0])
         self.km_max = float(st.chainage_km.max())
         self.t0 = bar.index[0]
         self.bar_x = ((bar.index - self.t0) / pd.Timedelta(minutes=1)).to_numpy(float)
@@ -127,33 +130,38 @@ def all_reports(ref=REPORTS_REF):
     for n in sorted(names):
         text = subprocess.run(["git", "-C", str(HERE), "show", f"{ref}:reports/{n}"],
                               check=True, capture_output=True, text=True).stdout
-        rows += [r for r in csv.DictReader(io.StringIO(text))
-                 if rivers.norm(r.get("river")) == rivers.DEFAULT]
+        rows += list(csv.DictReader(io.StringIO(text)))
     return sorted(rows, key=lambda r: r["time_aest"])
 
 
-def reaches(st, features):
-    """Reaches mouth to ruin: between stations up to Kholo, then between gravel runs.
-    Each has a zone: "msq" (published ratios), "msq_sn" (spring/neap figures), "hyp"."""
+def reaches(st, features, river=rivers.DEFAULT):
+    """One river's reaches, km 0 to its report limit: between stations up to its last
+    one, then between its gravel or rock runs. Each has a zone: "msq" (published
+    ratios), "msq_sn" (spring/neap figures), "hyp" (no predictions)."""
+    lim = rivers.report_km_max(river)
     out = []
     for a, b in zip(st.itertuples(), st.iloc[1:].itertuples()):
-        out.append({"from_km": a.chainage_km, "to_km": b.chainage_km,
+        out.append({"river": river, "from_km": a.chainage_km, "to_km": b.chainage_km,
                     "name": f"{a.name.split(' (')[0]} to {b.name.split(' (')[0]}",
-                    "zone": "msq" if b.chainage_km <= INDOOROOPILLY_KM else "msq_sn"})
-    runs = features[features.kind == "gravel run"].sort_values("km")
-    marks = [(float(st.chainage_km.max()), "Kholo Creek")]
-    marks += [(float(r.km), r.name) for r in runs.itertuples() if r.km < REPORT_KM_MAX]
-    marks += [(REPORT_KM_MAX, "Old weir ruin")]
+                    "zone": "msq" if river == rivers.DEFAULT and b.chainage_km <= INDOOROOPILLY_KM else "msq_sn"})
+    f = features[features.river.map(rivers.norm) == river]
+    runs = f[f.kind.isin(["gravel run", "rock run"])].sort_values("km")
+    end = st.iloc[-1]
+    marks = [(float(end.chainage_km), end["name"].split(" (")[0])]
+    marks += [(float(r.km), r.name) for r in runs.itertuples() if r.km < lim]
+    marks += [(lim, "Old weir ruin" if river == rivers.DEFAULT else "Sadliers Crossing race")]
     for (a, an), (b, bn) in zip(marks, marks[1:]):
-        out.append({"from_km": a, "to_km": b, "name": f"{an} to {bn}", "zone": "hyp"})
+        out.append({"river": river, "from_km": a, "to_km": b, "name": f"{an} to {bn}", "zone": "hyp"})
     return out
 
 
-def reach_of(rs, km):
-    for i, r in enumerate(rs):
-        if km <= r["to_km"] + 1e-9:
+def reach_of(rs, km, river=rivers.DEFAULT):
+    """Index into rs of the reach on river holding km."""
+    mine = [i for i, r in enumerate(rs) if r["river"] == river]
+    for i in mine:
+        if km <= rs[i]["to_km"] + 1e-9:
             return i
-    return len(rs) - 1
+    return mine[-1]
 
 
 def matched_words(m, n):
@@ -170,40 +178,73 @@ def build_payload(built=None, reports_ref=REPORTS_REF):
     st_all = rivers.only(pd.read_csv(DATA / "stations.csv"))
     st = load_stations(DATA / "stations.csv")
     bar = load_bars(sorted(DATA.glob("bar_*_10min.csv")))
-    model = Model(st, bar)
-    features = rivers.only(pd.read_csv(DATA / "features.csv"))
-    obs = rivers.only(pd.read_csv(DATA / "observations.csv", dtype=str).fillna(""))
-    cl = pd.read_csv(DATA / "centreline.csv")
-    river = cl[cl.chainage_km <= REPORT_KM_MAX + 0.5]
-    rs = reaches(st, features)
+    model = Model(st, bar)                       # the Brisbane's; also Bar high water
+    all_features = pd.read_csv(DATA / "features.csv")
+    all_features["river"] = all_features.river.map(rivers.norm)
+    features = rivers.only(all_features)
+    obs_all = pd.read_csv(DATA / "observations.csv", dtype=str).fillna("")
+    obs_all["river"] = obs_all.river.map(rivers.norm)
+    obs = rivers.only(obs_all)                   # H1 and the Brisbane's tallies
+    # Every river (item 19c): its model (river_tides.station_table, as the report page),
+    # reaches, line to just past its report limit, and its predicted high-water line by
+    # distance from the Bar along its path (a branch: the Brisbane to the confluence).
+    hw = st_all.dropna(subset=["chainage_km", "lag_hw_min"]).drop_duplicates("chainage_km")
+    models, rs, river_list = {rivers.DEFAULT: model}, [], []
+    for rid, row in rivers.load().items():
+        tab = st if rid == rivers.DEFAULT else station_table(rid)
+        if rid != rivers.DEFAULT:
+            models[rid] = Model(tab, bar, bar_msl=model.bar_msl)
+        rs += reaches(tab, all_features, rid)
+        conf = 0.0 if rid == rivers.DEFAULT else float(row["confluence_km"])
+        line = pd.read_csv(DATA / row["centreline"])
+        line = line[line.chainage_km <= float(row["report_km_max"]) + 0.5]
+        if rid == rivers.DEFAULT:
+            hw_line = {"km": hw.chainage_km.tolist(), "min": hw.lag_hw_min.tolist()}
+        else:
+            bst = pd.read_csv(DATA / "stations.csv")
+            bst = bst[(bst.river.map(rivers.norm) == rid)].dropna(subset=["chainage_km", "lag_hw_min"])
+            below = hw[hw.chainage_km < conf]
+            hw_line = {"km": below.chainage_km.tolist() + [conf] + (conf + bst.chainage_km).tolist(),
+                       "min": below.lag_hw_min.tolist() + [float(np.interp(conf, hw.chainage_km, hw.lag_hw_min))]
+                              + bst.lag_hw_min.tolist()}
+        last = tab.iloc[-1]
+        river_list.append({"id": rid, "name": row["name"], "confluence_km": None if rid == rivers.DEFAULT else conf,
+                           "km_max": float(tab.chainage_km.max()), "end_name": last["name"].split(" (")[0],
+                           "report_km_max": float(row["report_km_max"]),
+                           "line": {"lon": line.lon.round(6).tolist(), "lat": line.lat.round(6).tolist(),
+                                    "km": line.chainage_km.round(4).tolist()},
+                           "hw_line": hw_line})
+    conf_of = {r["id"]: r["confluence_km"] or 0.0 for r in river_list}
 
     reports, changed = [], 0
     for r in all_reports(reports_ref):
         t = pd.Timestamp(r["time_aest"])
-        km = float(r["km"])
-        v, why = verdict(model, r["dir"], km, t)
+        km, rid = float(r["km"]), rivers.norm(r.get("river"))
+        v, why = verdict(models[rid], r["dir"], km, t)
         if v != r["verdict"]:
             changed += 1
-            print(f"Verdict now {v}, was {r['verdict']}: {r['time_aest']} km {km} {r['dir']}")
-        reports.append({"time": r["time_aest"], "km": km, "bank": r["bank"], "alias": r["alias"],
+            print(f"Verdict now {v}, was {r['verdict']}: {r['time_aest']} {rid} km {km} {r['dir']}")
+        reports.append({"time": r["time_aest"], "river": rid, "km": km,
+                        "path_km": round(conf_of[rid] + km, 3), "bank": r["bank"], "alias": r["alias"],
                         "dir": r["dir"], "strength": int(r["strength"]) if r["strength"] else None,
                         "clarity": int(r["clarity"]) if r["clarity"] else None,
                         "problems": r["problems"], "verdict": v, "why": why,
                         "sent_verdict": r["verdict"], "device": r["device"],
-                        "reach": reach_of(rs, km), "bar_hw_min": model.bar_hw_offset(t)})
+                        "reach": reach_of(rs, km, rid), "bar_hw_min": model.bar_hw_offset(t)})
 
-    fnames = dict(zip(features.feature_id, features.name))
+    fnames = dict(zip(all_features.feature_id, all_features.name))
     observations = []
-    for o in obs.itertuples():
+    for o in obs_all.itertuples():
         a, b = float(o.km_from), float(o.km_to)
         t0, t1 = pd.Timestamp(o.time_from_aest), pd.Timestamp(o.time_to_aest)
         x0, x1 = model.bar_hw_offset(t0), model.bar_hw_offset(t1)
         observations.append({
-            "id": o.obs_id, "from": o.time_from_aest, "to": o.time_to_aest,
+            "id": o.obs_id, "from": o.time_from_aest, "to": o.time_to_aest, "river": o.river,
             "feature": fnames.get(o.feature_id, ""), "km": round((a + b) / 2, 2),
+            "path_km": round(conf_of[o.river] + (a + b) / 2, 3),
             "km_from": a, "km_to": b, "quantity": o.quantity, "value": o.value,
             "confidence": o.confidence, "kholo_min": o.kholo_min_m, "kholo_max": o.kholo_max_m,
-            "reach": reach_of(rs, (a + b) / 2),
+            "reach": reach_of(rs, (a + b) / 2, o.river),
             # The span on the chart, only when both ends are in the Bar data and on the
             # same side of one high water.
             "bar_hw_min": [x0, x1] if x0 is not None and x1 is not None and x0 <= x1 else None})
@@ -235,19 +276,17 @@ def build_payload(built=None, reports_ref=REPORTS_REF):
         tests.append({"time": o.value, "km": km, "bar_hw_min": x, "lo": lo, "hi": hi,
                       "result": "for" if ok else "against"})
 
-    hw = st_all.dropna(subset=["chainage_km", "lag_hw_min"]).drop_duplicates("chainage_km")
     meta = {"km_max": model.km_max, "report_km_max": REPORT_KM_MAX, "indooroopilly_km": INDOOROOPILLY_KM,
             "turn_min": TURN_MIN, "pct_min": PCT_MIN, "changed": changed}
     if built is not None:
         meta["built"] = built.strftime("%Y-%m-%dT%H:%M")
     return {
         "meta": meta,
-        "river": {"lon": river.lon.round(6).tolist(), "lat": river.lat.round(6).tolist(),
-                  "km": river.chainage_km.round(4).tolist()},
+        # Every river: line, limits, and MSQ's high-water lags by distance from the Bar
+        # along its path, for the chart's predicted high water line.
+        "rivers": river_list,
         "stations": station_labels(st, DATA / "centreline.csv"),
-        # MSQ's high-water lags, for the chart's predicted high water line.
-        "hw_line": {"km": hw.chainage_km.tolist(), "min": hw.lag_hw_min.tolist()},
-        "features": features[["feature_id", "kind", "name", "km", "lat", "lon"]].to_dict("records"),
+        "features": all_features[["feature_id", "kind", "name", "river", "km", "lat", "lon"]].to_dict("records"),
         "reaches": rs,
         "reports": reports,
         "observations": observations,

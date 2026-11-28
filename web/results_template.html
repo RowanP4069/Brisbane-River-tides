@@ -90,13 +90,15 @@
   <h2>By reach</h2>
   <div class="scroll"><table id="reachTable"></table></div>
   <p class="muted">"Matched" counts only reports that could be checked: not near a turn, not swirling, and below Kholo
-    Creek. It shows as a percentage once a reach has <span id="pctMin"></span> such reports; before that a percentage would
+    Creek (on the Bremer, below Warrego Highway Bridge). It shows as a percentage once a reach has <span id="pctMin"></span> such reports; before that a percentage would
     look more certain than it is. Devices: reports from the same phone or computer are grouped, so one keen paddler
     doesn't look like many separate confirmations.</p>
 </section>
 
 <section class="card">
   <h2>When, relative to high water at the Bar</h2>
+  <div class="legend" id="chartPathBox" hidden><label>River <select id="chartPath"></select></label>
+    <span class="muted">a branch's chart runs up the Brisbane to the confluence, then up the branch</span></div>
   <div class="legend" id="chartLegend"></div>
   <svg id="chart" role="img" aria-label="Reports and observations by place along the river and time from high water at the Brisbane Bar"></svg>
   <p class="muted">Each report sits at its place along the river (up the side) and how long before or after the
@@ -155,14 +157,19 @@ const DATA = /*__DATA__*/null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const M = DATA.meta, R = DATA.river;
+const M = DATA.meta;
+// Every river (item 19c): line, last tide station, report limit, high-water line.
+const RIVERS = DATA.rivers, RIVER_BY_ID = Object.fromEntries(RIVERS.map(r => [r.id, r]));
+const R = RIVER_BY_ID.brisbane.line;
+const riv = x => RIVER_BY_ID[x.river || "brisbane"];
 
 // ---- Words --------------------------------------------------------------------------
 const DIR_WORDS = { up: "upstream", down: "downstream", slack: "slack", swirl: "swirling" };
 const STRENGTH_WORDS = ["slack", "gentle", "moderate", "strong", "very strong"];
 const VERDICT_WORDS = { match: "Matched", turn: "Near the turn", mismatch: "Didn't match", none: "No verdict" };
 const WHY_WORDS = { above: "no prediction above Kholo Creek", swirl: "swirling", no_data: "no predictions for that time" };
-const verdictText = r => r.verdict === "none" ? `No verdict (${WHY_WORDS[r.why] || "none"})` : VERDICT_WORDS[r.verdict];
+const verdictText = r => r.verdict !== "none" ? VERDICT_WORDS[r.verdict]
+  : `No verdict (${r.why === "above" ? "no prediction above " + riv(r).end_name : WHY_WORDS[r.why] || "none"})`;
 const QTY_WORDS = { run_state: "Run", water_surface: "Water surface", mark_state: "Mark", high_water_time: "High water at" };
 const isoMs = iso => Date.parse((iso.length === 10 ? iso + "T00:00" : iso.replace(" ", "T").slice(0, 16)) + ":00Z");  // naive AEST read as UTC
 const fmtDate = iso => new Date(isoMs(iso)).toLocaleDateString("en-AU", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
@@ -172,7 +179,7 @@ const fmtOff = m => { if (m === null || m === undefined) return ""; const a = Ma
   return `${h ? h + " h " : ""}${mm} min ${m < 0 ? "before" : "after"} Bar high water`; };
 const flowText = r => DIR_WORDS[r.dir] + (r.dir === "slack" || r.dir === "swirl" || r.strength === null ? "" : `, ${STRENGTH_WORDS[r.strength]}`);
 const obsText = o => `${QTY_WORDS[o.quantity] || o.quantity} ${o.value}`;
-const placeText = (km, name) => `km ${km.toFixed(1)}${name ? ": " + name : ""}`;
+const placeText = (km, name, river) => `${river && river !== "brisbane" ? RIVER_BY_ID[river].name + " " : ""}km ${km.toFixed(1)}${name ? ": " + name : ""}`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 // ---- Summary ------------------------------------------------------------------------
@@ -187,7 +194,8 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
     + `${plural(days, "day", "days")}` : "No flow reports yet";
   s += `, and ${plural(obs.length, "field observation", "field observations")} on ${plural(odays, "day", "days")}. `;
   if (m + x) s += `Of the ${plural(m + x, "report", "reports")} that could be checked against the predictions, ${m} matched. `;
-  if (above) s += `${above} ${above === 1 ? "was" : "were"} above Kholo Creek, where reports are the only evidence.`;
+  if (above) s += `${above} ${above === 1 ? "was" : "were"} above the last tide station on ${above === 1 ? "its" : "their"} river `
+    + `(Kholo Creek on the Brisbane, Warrego Highway Bridge on the Bremer), where reports are the only evidence.`;
   $("summary").textContent = s;
   $("pctMin").textContent = M.pct_min; $("turnMin").textContent = M.turn_min;
 }
@@ -200,22 +208,32 @@ function interp(x, xs, ys) {         // as np.interp: linear, held at the ends
   while (xs[j] < x) j++;
   return ys[j - 1] + (ys[j] - ys[j - 1]) * (x - xs[j - 1]) / (xs[j] - xs[j - 1]);
 }
-const lonLatAt = km => [interp(km, R.km, R.lon), interp(km, R.km, R.lat)];
+const lonLatAt = (km, river = "brisbane") => {
+  const L = RIVER_BY_ID[river].line;
+  return [interp(km, L.km, L.lon), interp(km, L.km, L.lat)];
+};
 // A short line across the river at km, halfM metres each side of the centreline.
-function acrossAt(km, halfM) {
-  const [x0, y0] = lonLatAt(km - 0.15), [x1, y1] = lonLatAt(km + 0.15), [x, y] = lonLatAt(km);
+function acrossAt(km, halfM, river = "brisbane") {
+  const [x0, y0] = lonLatAt(km - 0.15, river), [x1, y1] = lonLatAt(km + 0.15, river), [x, y] = lonLatAt(km, river);
   const kx = 111320 * Math.cos(y * Math.PI / 180), ky = 110540;
   const dx = (x1 - x0) * kx, dy = (y1 - y0) * ky, len = Math.hypot(dx, dy) || 1;
   const px = -dy / len * halfM, py = dx / len * halfM;
   return [[x - px / kx, y - py / ky], [x + px / kx, y + py / ky]];
 }
 const LIMITS = [
-  { km: M.indooroopilly_km, colour: css("--lim-msq"), label: "Published ratios end",
+  { river: "brisbane", km: M.indooroopilly_km, colour: css("--lim-msq"), label: "Published ratios end",
     text: `Indooroopilly, km ${M.indooroopilly_km.toFixed(1)}. Below here the predictions use MSQ's published height ratios.` },
-  { km: M.km_max, colour: css("--lim-kholo"), label: "MSQ figures end",
+  { river: "brisbane", km: M.km_max, colour: css("--lim-kholo"), label: "MSQ figures end",
     text: `Kholo Creek, km ${M.km_max.toFixed(1)}. From Indooroopilly to here MSQ gives separate spring and neap figures, `
       + "which this project averages. Above here there are no predictions, only hypotheses under test." },
+  // A branch's last MSQ station (no Indooroopilly-style line: none publishes a ratio).
+  ...RIVERS.filter(rv => rv.id !== "brisbane").map(rv => ({ river: rv.id, km: rv.km_max, colour: css("--lim-kholo"),
+    label: "MSQ figures end",
+    text: `${rv.end_name}, ${rv.name} km ${rv.km_max.toFixed(1)}. From the confluence to here MSQ gives spring and neap `
+      + "figures only, which this project averages. Above here there are no predictions." })),
 ];
+// Distance from the Bar along a river's path (a branch: the Brisbane to the confluence).
+const pathKm = (km, river) => (RIVER_BY_ID[river || "brisbane"].confluence_km || 0) + km;
 const markColour = v => css("--m-" + v);
 
 // ---- Map ----------------------------------------------------------------------------
@@ -233,25 +251,26 @@ function diamondImage(colour) {
   g.fillStyle = colour; g.fill(); g.lineWidth = 2; g.strokeStyle = "#fff"; g.stroke();
   return g.getImageData(0, 0, s, s);
 }
-const reportPopupLine = r => `${fmtWhen(r.time)}, ${placeText(r.km)}: ${flowText(r)} (${r.alias || "anonymous"}). `
+const reportPopupLine = r => `${fmtWhen(r.time)}, ${placeText(r.km, "", r.river)}: ${flowText(r)} (${r.alias || "anonymous"}). `
   + `<span class="v-${r.verdict}">${esc(verdictText(r))}</span>`;
-const obsPopupLine = o => `${fmtDate(o.from)}, ${fmtTime(o.from)}–${fmtTime(o.to)}, ${esc(placeText(o.km, o.feature))}: `
+const obsPopupLine = o => `${fmtDate(o.from)}, ${fmtTime(o.from)}–${fmtTime(o.to)}, ${esc(placeText(o.km, o.feature, o.river))}: `
   + `<span class="own">${esc(obsText(o))}</span> (${esc(o.confidence)})`
   + (o.kholo_min ? `. Kholo Creek predicted ${esc(o.kholo_min)}–${esc(o.kholo_max)} m` : "");
 
 let map = null;
 try {
   map = new maplibregl.Map({ container: "map", style: "https://tiles.openfreemap.org/styles/positron",
-    bounds: [[152.78, -27.62], [153.17, -27.39]], fitBoundsOptions: { padding: 20 } });
+    bounds: [[152.73, -27.63], [153.17, -27.39]], fitBoundsOptions: { padding: 20 } });     // Bar to Ipswich
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
   map.on("load", () => {
-    map.addSource("river", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString",
-      coordinates: R.lon.map((x, i) => [x, R.lat[i]]) } } });
+    map.addSource("river", { type: "geojson", data: { type: "FeatureCollection", features: RIVERS.map(rv => ({
+      type: "Feature", properties: { id: rv.id }, geometry: { type: "LineString",
+        coordinates: rv.line.lon.map((x, i) => [x, rv.line.lat[i]]) } })) } });
     map.addLayer({ id: "river", type: "line", source: "river", paint: { "line-color": "#1f6fb2", "line-width": 2, "line-opacity": .5 } });
 
     map.addSource("limits", { type: "geojson", data: { type: "FeatureCollection", features: LIMITS.map((l, i) => ({
       type: "Feature", properties: { i, colour: l.colour, label: l.label },
-      geometry: { type: "LineString", coordinates: acrossAt(l.km, 450) } })) } });
+      geometry: { type: "LineString", coordinates: acrossAt(l.km, l.river === "brisbane" ? 450 : 250, l.river) } })) } });
     map.addLayer({ id: "limits", type: "line", source: "limits", paint: { "line-color": ["get", "colour"],
       "line-width": 4, "line-dasharray": [2, 1] } });
     map.addLayer({ id: "limit-labels", type: "symbol", source: "limits", layout: { "symbol-placement": "point",
@@ -267,13 +286,13 @@ try {
       "text-anchor": "top", "text-optional": true }, paint: { "text-color": "#5d6873", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
 
     map.addSource("reports", { type: "geojson", data: { type: "FeatureCollection", features: DATA.reports.map((r, i) => ({
-      type: "Feature", properties: { i, colour: markColour(r.verdict) }, geometry: { type: "Point", coordinates: lonLatAt(r.km) } })) } });
+      type: "Feature", properties: { i, colour: markColour(r.verdict) }, geometry: { type: "Point", coordinates: lonLatAt(r.km, r.river) } })) } });
     map.addLayer({ id: "reports", type: "circle", source: "reports", paint: { "circle-radius": 7,
       "circle-color": ["get", "colour"], "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
 
     map.addImage("diamond", diamondImage(css("--own")));
     map.addSource("obs", { type: "geojson", data: { type: "FeatureCollection", features: DATA.observations.map((o, i) => ({
-      type: "Feature", properties: { i }, geometry: { type: "Point", coordinates: lonLatAt(o.km) } })) } });
+      type: "Feature", properties: { i }, geometry: { type: "Point", coordinates: lonLatAt(o.km, o.river) } })) } });
     map.addLayer({ id: "obs", type: "symbol", source: "obs", layout: { "icon-image": "diamond", "icon-allow-overlap": true,
       "icon-offset": [14, 0] } });
 
@@ -302,17 +321,22 @@ try {
 
 // ---- By reach -----------------------------------------------------------------------
 {
-  const ZONES = [
-    { id: "msq", head: "Brisbane Bar to Indooroopilly", sub: "MSQ published ratios" },
-    { id: "msq_sn", head: "Indooroopilly to Kholo Creek", sub: "MSQ spring and neap figures, averaged" },
-    { id: "hyp", head: "Above Kholo Creek", sub: "no predictions: hypotheses under test" },
-  ];
+  const ZONES_BY_RIVER = {
+    brisbane: [
+      { id: "msq", head: "Brisbane Bar to Indooroopilly", sub: "MSQ published ratios" },
+      { id: "msq_sn", head: "Indooroopilly to Kholo Creek", sub: "MSQ spring and neap figures, averaged" },
+      { id: "hyp", head: "Above Kholo Creek", sub: "no predictions: hypotheses under test" }],
+  };
+  for (const rv of RIVERS) if (!ZONES_BY_RIVER[rv.id]) ZONES_BY_RIVER[rv.id] = [
+    { id: "msq_sn", head: `Confluence to ${rv.end_name}`, sub: "MSQ spring and neap figures, averaged" },
+    { id: "hyp", head: `Above ${rv.end_name}`, sub: "no predictions" }];
   let h = `<thead><tr><th>Reach</th><th class="n">Reports</th><th class="n">Devices</th><th class="n">Days</th>`
     + `<th class="n">Matched</th><th class="n">Near turn</th><th class="n">Didn't match</th><th class="n">No verdict</th>`
     + `<th class="n">Field obs.</th></tr></thead><tbody>`;
-  for (const z of ZONES) {
-    h += `<tr class="zone"><td colspan="9">${esc(z.head)} <span class="muted">${esc(z.sub)}</span></td></tr>`;
-    const rows = DATA.reaches.filter(r => r.zone === z.id && (r.reports || r.observations));
+  for (const rv of RIVERS) for (const z of ZONES_BY_RIVER[rv.id]) {
+    const head = RIVERS.length > 1 ? `${rv.name}: ${z.head}` : z.head;
+    h += `<tr class="zone"><td colspan="9">${esc(head)} <span class="muted">${esc(z.sub)}</span></td></tr>`;
+    const rows = DATA.reaches.filter(r => r.river === rv.id && r.zone === z.id && (r.reports || r.observations));
     if (!rows.length) { h += `<tr><td colspan="9" class="muted">No reports yet.</td></tr>`; continue; }
     for (const r of rows) {
       const dash = v => v ? v : `<span class="muted">0</span>`;
@@ -328,14 +352,18 @@ try {
 }
 
 // ---- Chart: km against time from Bar high water --------------------------------------
+let chartPath = "brisbane";
+// On a path: the path's own river, or the Brisbane below the path's confluence.
+const onChartPath = x => (x.river || "brisbane") === chartPath
+  || ((x.river || "brisbane") === "brisbane" && chartPath !== "brisbane" && x.km <= RIVER_BY_ID[chartPath].confluence_km + 1e-9);
 function drawChart() {
-  const svg = $("chart"), NS = "http://www.w3.org/2000/svg";
+  const svg = $("chart"), NS = "http://www.w3.org/2000/svg", PR = RIVER_BY_ID[chartPath];
   svg.replaceChildren();
   // Drawn at the box's own width (1 unit = 1 px) so the text stays readable on a phone.
   const W = Math.max(320, Math.round(svg.parentElement.clientWidth)), H = W < 560 ? 380 : 440;
   const L = 40, Rm = 10, T = 12, B = 34;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  const X0 = -390, X1 = 390, Y0 = 0, Y1 = Math.ceil(M.report_km_max / 10) * 10;
+  const X0 = -390, X1 = 390, Y0 = 0, Y1 = Math.ceil(pathKm(PR.report_km_max, chartPath) / 10) * 10;
   const sx = m => L + (m - X0) / (X1 - X0) * (W - L - Rm), sy = km => H - B - (km - Y0) / (Y1 - Y0) * (H - T - B);
   const el = (name, attrs, parent = svg) => { const e = document.createElementNS(NS, name);
     for (const k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; };
@@ -345,7 +373,7 @@ function drawChart() {
     el("line", { x1: L, x2: W - Rm, y1: sy(km), y2: sy(km), class: "grid" });
     txt(L - 6, sy(km) + 4, `${km}`, { "text-anchor": "end" });
   }
-  txt(12, T + (H - T - B) / 2, "km up the river", { transform: `rotate(-90 12 ${T + (H - T - B) / 2})`, "text-anchor": "middle" });
+  txt(12, T + (H - T - B) / 2, chartPath === "brisbane" ? "km up the river" : `km from the Bar, via the ${PR.name}`, { transform: `rotate(-90 12 ${T + (H - T - B) / 2})`, "text-anchor": "middle" });
   for (let m = -360; m <= 360; m += 120) {
     el("line", { x1: sx(m), x2: sx(m), y1: T, y2: H - B, class: m === 0 ? "axis" : "grid" });
     txt(sx(m), H - B + 15, m === 0 ? "Bar HW" : `${m > 0 ? "+" : "−"}${Math.abs(m / 60)} h`, { "text-anchor": "middle" });
@@ -353,12 +381,14 @@ function drawChart() {
   txt(L + (W - L - Rm) / 2, H - 4, "time from nearest predicted high water at the Bar", { "text-anchor": "middle" });
 
   // Limit lines, labelled in the right margin.
-  for (const l of LIMITS) {
-    el("line", { x1: L, x2: W - Rm, y1: sy(l.km), y2: sy(l.km), stroke: l.colour, "stroke-width": 2, "stroke-dasharray": "6 3" });
-    txt(W - Rm - 4, sy(l.km) + 14, l.label, { style: "fill:var(--fg)", "text-anchor": "end" });
+  for (const l of LIMITS.filter(onChartPath)) {
+    const yk = sy(pathKm(l.km, l.river));
+    el("line", { x1: L, x2: W - Rm, y1: yk, y2: yk, stroke: l.colour, "stroke-width": 2, "stroke-dasharray": "6 3" });
+    txt(W - Rm - 4, yk + 14, l.label, { style: "fill:var(--fg)", "text-anchor": "end" });
   }
   // H1's window above Kholo: a band between the slowest and fastest claimed timings.
   const h1 = DATA.h1, d = h1.to_km - h1.from_km;
+  if (chartPath === "brisbane") {                 // H1 is about the Brisbane only
   const band = [[h1.base_min, h1.from_km], [h1.base_min + h1.hi_per_km * d, h1.to_km],
                 [h1.base_min + h1.lo_per_km * d, h1.to_km]];
   const bandEl = el("polygon", { points: band.map(([m, km]) => `${sx(m)},${sy(km)}`).join(" "),
@@ -366,33 +396,34 @@ function drawChart() {
   bandEl.dataset.tip = `H1: high water ${h1.base_min}–${Math.round(h1.base_min + h1.hi_per_km * d)} min after Bar high water, `
     + `km ${h1.from_km}–${h1.to_km} (hypothesis under test)`;
   txt(sx(h1.base_min + h1.hi_per_km * d) + 6, sy(h1.to_km) + 4, "H1 window", { style: `fill:${css("--own")}` });
+  }
   // Predicted high water (MSQ's high-water lags) up to Kholo.
-  const hw = DATA.hw_line;
+  const hw = PR.hw_line;
   const hwEl = el("polyline", { points: hw.km.map((km, i) => `${sx(hw.min[i])},${sy(km)}`).join(" "),
     fill: "none", stroke: css("--accent"), "stroke-width": 2 });
   hwEl.dataset.tip = "Predicted high water: when MSQ's tables put high water at each place, after the Bar's";
   txt(sx(interp(20, hw.km, hw.min)) + 8, sy(20), "predicted high water", { style: `fill:${css("--accent")}` });
 
   // Field observations: a span across their time, a diamond at its middle.
-  for (const o of DATA.observations) {
+  for (const o of DATA.observations.filter(onChartPath)) {
     if (!o.bar_hw_min) continue;
-    const [a, b] = o.bar_hw_min, y = sy(o.km), xm = sx((a + b) / 2);
+    const [a, b] = o.bar_hw_min, y = sy(o.path_km), xm = sx((a + b) / 2);
     el("line", { x1: sx(a), x2: sx(b), y1: y, y2: y, stroke: css("--own"), "stroke-width": 2 });
     const s = 6;
     const dEl = el("polygon", { points: `${xm},${y - s} ${xm + s},${y} ${xm},${y + s} ${xm - s},${y}`, fill: css("--own"), class: "mk" });
-    dEl.dataset.tip = `Field observation, ${fmtDate(o.from)} ${fmtTime(o.from)}–${fmtTime(o.to)}, ${placeText(o.km, o.feature)}: `
+    dEl.dataset.tip = `Field observation, ${fmtDate(o.from)} ${fmtTime(o.from)}–${fmtTime(o.to)}, ${placeText(o.km, o.feature, o.river)}: `
       + `${obsText(o)}. ${fmtOff(a)} to ${fmtOff(b)}.`;
   }
   // Reports: shape = direction seen, colour = verdict.
-  for (const r of DATA.reports) {
+  for (const r of DATA.reports.filter(onChartPath)) {
     if (r.bar_hw_min === null) continue;
-    const x = sx(r.bar_hw_min), y = sy(r.km), s = 6.5, c = markColour(r.verdict);
+    const x = sx(r.bar_hw_min), y = sy(r.path_km), s = 6.5, c = markColour(r.verdict);
     let e;
     if (r.dir === "up") e = el("polygon", { points: `${x},${y - s} ${x + s},${y + s * .8} ${x - s},${y + s * .8}`, fill: c, class: "mk" });
     else if (r.dir === "down") e = el("polygon", { points: `${x},${y + s} ${x + s},${y - s * .8} ${x - s},${y - s * .8}`, fill: c, class: "mk" });
     else if (r.dir === "slack") e = el("circle", { cx: x, cy: y, r: 5, fill: "#fff", stroke: c, "stroke-width": 2.5, class: "mk" });
     else e = el("path", { d: `M${x - 5},${y - 5}L${x + 5},${y + 5}M${x - 5},${y + 5}L${x + 5},${y - 5}`, stroke: c, "stroke-width": 2.5, class: "mk" });
-    e.dataset.tip = `${fmtWhen(r.time)}, ${placeText(r.km)}: ${flowText(r)} (${r.alias || "anonymous"}). ${verdictText(r)}. ${fmtOff(r.bar_hw_min)}.`;
+    e.dataset.tip = `${fmtWhen(r.time)}, ${placeText(r.km, "", r.river)}: ${flowText(r)} (${r.alias || "anonymous"}). ${verdictText(r)}. ${fmtOff(r.bar_hw_min)}.`;
   }
 
 }
@@ -416,6 +447,9 @@ function drawChart() {
   window.addEventListener("scroll", () => { tip.style.display = "none"; }, { passive: true });
 }
 
+for (const rv of RIVERS) $("chartPath").add(new Option(rv.name, rv.id));
+$("chartPathBox").hidden = RIVERS.length < 2;
+$("chartPath").addEventListener("change", e => { chartPath = e.target.value; drawChart(); });
 drawChart();
 let chartWidth = $("chart").parentElement.clientWidth;
 window.addEventListener("resize", () => {
@@ -451,7 +485,7 @@ window.addEventListener("resize", () => {
   const obs = [...DATA.observations].sort((a, b) => b.from.localeCompare(a.from));
   $("obsTable").innerHTML = `<thead><tr><th>Date</th><th>Time</th><th>Place</th><th>Seen</th><th>Confidence</th>`
     + `<th class="n">Kholo Creek level</th></tr></thead><tbody>` + (obs.length ? obs.map(o => `<tr><td>${esc(fmtDate(o.from))}</td>`
-    + `<td>${esc(fmtTime(o.from))}–${esc(fmtTime(o.to))}</td><td>${esc(placeText(o.km, o.feature))}</td>`
+    + `<td>${esc(fmtTime(o.from))}–${esc(fmtTime(o.to))}</td><td>${esc(placeText(o.km, o.feature, o.river))}</td>`
     + `<td class="own">${esc(obsText(o))}</td><td>${esc(o.confidence)}</td>`
     + `<td class="n">${o.kholo_min ? `${esc(o.kholo_min)}–${esc(o.kholo_max)} m` : ""}</td></tr>`).join("")
     : `<tr><td colspan="6" class="muted">None yet.</td></tr>`) + "</tbody>";
@@ -460,7 +494,7 @@ window.addEventListener("resize", () => {
   const BANK = { mid: "mid", left: "left", right: "right" };
   $("repTable").innerHTML = `<thead><tr><th>When</th><th class="n">km</th><th>Bank</th><th>Flow</th><th>Verdict</th>`
     + `<th>Reporter</th></tr></thead><tbody>` + (reps.length ? reps.map(r => `<tr><td>${esc(fmtWhen(r.time))}</td>`
-    + `<td class="n">${r.km.toFixed(1)}</td><td>${esc(BANK[r.bank] || r.bank)}</td><td>${esc(flowText(r))}</td>`
+    + `<td class="n">${r.river && r.river !== "brisbane" ? esc(RIVER_BY_ID[r.river].name) + " " : ""}${r.km.toFixed(1)}</td><td>${esc(BANK[r.bank] || r.bank)}</td><td>${esc(flowText(r))}</td>`
     + `<td><span class="v-${r.verdict}">${esc(verdictText(r))}</span>`
     + (r.sent_verdict !== r.verdict ? ` <span class="muted">(${esc(VERDICT_WORDS[r.sent_verdict] || r.sent_verdict)} when sent)</span>` : "")
     + `</td><td>${esc(r.alias || "anonymous")}</td></tr>`).join("")

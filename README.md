@@ -115,7 +115,7 @@ The **Report the flow** page lets people on the river report which way the water
 
 ### Results page
 
-**Report the flow (results)** gathers everything seen so far: every accepted report and the project's own field observations (`data/observations.csv`), on a map with two confidence lines (Indooroopilly, where MSQ's published ratios end, and Kholo Creek, where MSQ's figures end), a summary by reach, and a chart of where along the river and how long before or after high water at the Bar each was seen.
+**Report the flow (results)** gathers everything seen so far: every accepted report and the project's own field observations (`data/observations.csv`), on a map with two confidence lines (Indooroopilly, where MSQ's published ratios end, and Kholo Creek, where MSQ's figures end), a summary by reach, and a chart of where along the river and how long before or after high water at the Bar each was seen. Since 2026-11-28 it covers the Bremer River too: its reaches have their own rows (confluence to Warrego Highway Bridge, then the rock races above Ipswich), the map has a line where MSQ's Bremer figures end, and the chart has a **River** choice: the Bremer's runs by distance from the Bar, up the Brisbane to the confluence and then up the Bremer. The H1 window is on the Brisbane chart only.
 
 - `build_results.py` builds it, working each report's verdict out again against the current model, so the match rate follows the model as it improves. The build prints any report whose verdict differs from the one the reporter was shown.
 - A reach's match rate shows as "m of n" until it has 5 checkable reports, then as a percentage. Reports from one device are counted as one device, so a single keen paddler doesn't look like many confirmations.
