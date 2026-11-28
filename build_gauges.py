@@ -37,6 +37,7 @@ import pandas as pd
 from build_centreline import GAUGE_LAT, GAUGE_LON
 from collect_gauges import BCC_GAUGES, MSQ_BAR_GAUGE, USER_AGENT
 from river_tides import BRISBANE, load_stations, station_labels, to_json
+import rivers
 
 HERE = Path(__file__).parent
 DATA = HERE / "data"
@@ -94,7 +95,7 @@ def download_gauges():
         rows.append({"sensor_id": g, "bom_no": m["location_id"], "name": m["location_name"],
                      "short": SHORT[g], "lat": m["latitude"], "lon": m["longitude"],
                      "datum": m["sensor_type"], "unit": m["unit_of_measure"],
-                     "chainage_km": round(ch, 2), "offset_m": round(off)})
+                     "river": "brisbane", "chainage_km": round(ch, 2), "offset_m": round(off)})
     with GAUGES_CSV.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
         w.writeheader()
@@ -169,7 +170,7 @@ def copy_gauges():
 
 
 def build_payload(built=None):
-    g = pd.read_csv(GAUGES_CSV, dtype={"bom_no": str})
+    g = rivers.only(pd.read_csv(GAUGES_CSV, dtype={"bom_no": str}))
     if not g.chainage_km.is_monotonic_increasing:
         raise SystemExit(f"{GAUGES_CSV}: gauges must be listed downstream to upstream")
     st = load_stations(DATA / "stations.csv")

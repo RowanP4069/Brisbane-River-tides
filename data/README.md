@@ -13,6 +13,19 @@ Placeholders marked `TODO` are things I couldn't confirm from here. Fill them in
 | `features.csv` | Gravel runs and landmarks between Kholo Creek and the old weir ruin | Field visits and OpenStreetMap |
 | `observations.csv` | What field visits showed at those features (run running or drowned, water surface) | Field visits, with photos and videos kept privately |
 | `guesses.csv` | Named, dated guesses for the Guesswork (sandbox) page above Kholo Creek | The project's own guesses; not predictions |
+| `rivers.csv` | The rivers places can be on, and how a branch joins its parent | The project's own list (roadmap item 6) |
+
+---
+
+## Rivers: the `river` column and `rivers.csv`
+
+Added 2026-11-28 (roadmap item 6), ahead of the Bremer River branch (item 19). A place is a river and a km on that river's own centreline. The Brisbane River's km runs from the Bar gauge; a branch (a tributary of the Brisbane, such as the Bremer) will have km 0 at its confluence.
+
+- `rivers.csv`: one row per river. `river` is the id used everywhere else (lower case, e.g. `brisbane`), `name` the label shown on pages, `parent` and `confluence_km` (the parent's km at the confluence) blank for the Brisbane, `centreline` the file in this folder. Only `brisbane` so far.
+- `stations.csv`, `features.csv`, `observations.csv`, `ramps.csv` and `gauges.csv` have a `river` column just before their km column. Every row is `brisbane` so far.
+- Flow reports carry `river` too: the report page sends it inside the report's JSON (no extra Form question), and `collect_reports.py` writes it as a column of the reports CSV. Reports sent before 2026-11-28 have none, and are saved as `brisbane`.
+- A blank or missing `river` means `brisbane` everywhere, so older files and links keep their meaning. Every script uses only the Brisbane rows for now (`rivers.py`).
+- Links on the predictions page: `#YYYY-MM-DD/km2.5` is a place on the Brisbane, as before; a place on another river carries its id, `#YYYY-MM-DD/bremer/km3.1`. Until that river is built, such a link opens the day without a marked place.
 
 ---
 

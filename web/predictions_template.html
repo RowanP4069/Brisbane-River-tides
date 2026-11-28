@@ -420,10 +420,18 @@ if (![...hoursSel.options].some(o => +o.value === DATA.meta.hours)) {
 state.hours = DATA.meta.hours;
 hoursSel.value = String(DATA.meta.hours);
 // The address: #YYYY-MM-DD, optionally followed by /km<chainage> for a marked place,
-// e.g. #2026-11-17/km2.5. Either part may be missing or invalid (then NaN).
+// e.g. #2026-11-17/km2.5. A place on another river carries its id first, e.g.
+// #2026-11-17/bremer/km3.1 (item 6); a Brisbane place is written without one, so old
+// links keep working. Either part may be missing or invalid (then NaN); a place on a
+// river this page doesn't draw is ignored (the day still opens).
+const PAGE_RIVERS = ["brisbane"];
 function parseHash() {
-  const [d = "", k = ""] = location.hash.slice(1).split("/");
-  return { day: dayFromText(d), km: /^km\d+(\.\d+)?$/.test(k) ? +k.slice(2) : NaN };
+  const parts = location.hash.slice(1).split("/");
+  const d = parts[0] || "";
+  const named = parts.length > 2 && !/^km/.test(parts[1]);      // #day/<river>/km..
+  const [river, k] = named ? [parts[1].toLowerCase(), parts[2]] : ["brisbane", parts[1] || ""];
+  const ok = PAGE_RIVERS.includes(river) && /^km\d+(\.\d+)?$/.test(k);
+  return { day: dayFromText(d), river, km: ok ? +k.slice(2) : NaN };
 }
 // Opening day: from the address if valid; else river_tides.py --start if one was given;
 // else today in Brisbane. Moved into range if needed.

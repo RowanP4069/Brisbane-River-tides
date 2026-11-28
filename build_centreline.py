@@ -39,6 +39,7 @@ import urllib.request
 from pathlib import Path
 
 import numpy as np
+import rivers
 
 HERE = Path(__file__).parent
 DATA = HERE / "data"
@@ -252,6 +253,8 @@ def station_report(coords, ch, stations_path, sep_km=2.0):
           f"{'2nd reach':>16s}  flag")
     out = []
     for r in rows:
+        if rivers.norm(r.get("river")) != rivers.DEFAULT:
+            continue        # another river's station: snapped to its own centreline
         if not r["lat"]:
             continue        # no position (Mt Crosby Weir: not in the MSQ tables)
         px, py = to_xy(float(r["lon"]), float(r["lat"]))
@@ -279,7 +282,7 @@ def write_stations(stations_path, new_ch):
         rd = csv.DictReader(f)
         fields, rows = rd.fieldnames, list(rd)
     for r in rows:
-        if r["name"] in new_ch:
+        if r["name"] in new_ch and rivers.norm(r.get("river")) == rivers.DEFAULT:
             r["chainage_km"] = f"{new_ch[r['name']]:.1f}"
     with open(stations_path, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, lineterminator=eol)

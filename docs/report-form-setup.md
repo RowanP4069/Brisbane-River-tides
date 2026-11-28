@@ -39,7 +39,7 @@ Questions: add exactly two, in this order. Choose the question type "Paragraph" 
 1. A question titled `report`. It receives the public part of each report.
 2. A question titled `private`. It receives the private part.
 
-The page fills in both answers in a format called JSON, which is text that a program can read. People never type into these questions themselves.
+The page fills in both answers in a format called JSON, which is text that a program can read. People never type into these questions themselves. New details go inside the JSON, not into new questions: for example, since 2026-11-28 the report says which river it is on (`river`), with no change to the form or the sheet.
 
 Settings: open the form's "Settings" tab and expand the "Responses" section. Make sure that:
 

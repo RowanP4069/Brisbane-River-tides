@@ -45,13 +45,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from collect_gauges import USER_AGENT
+import rivers
 
 HERE = Path(__file__).parent
 PUBLIC_CSV = ("https://docs.google.com/spreadsheets/d/e/2PACX-1vRREHLIOYMjz8rcYs-_mt-aLazFHzp3lFRzzXA9"
               "XrAIan_E_RbwgQsUmtzP5DU9097hakfMS1twYsh2/pub?gid=1809157979&single=true&output=csv")
 HIDDEN_CSV = HERE / "data" / "reports_hidden.csv"
 
-FIELDS = ["submitted_aest", "time_aest", "km", "bank", "alias", "dir_kind", "dir", "strength",
+FIELDS = ["submitted_aest", "time_aest", "river", "km", "bank", "alias", "dir_kind", "dir", "strength",
           "speed_kmh", "clarity", "problems", "verdict", "device"]
 DIRS = {"up", "down", "slack", "swirl"}
 BANKS = {"mid", "left", "right"}
@@ -126,6 +127,12 @@ def check(submitted, raw):
         return "time after submission"
     if t < sub - MAX_AGE - SLACK_TIME:
         return "time too long before submission"
+    # river (item 6): optional, a missing key means brisbane (pages from before
+    # 2026-11-28 don't send it). Only rivers in data/rivers.csv are accepted.
+    river = r.get("river")
+    if river is not None and not (isinstance(river, str) and rivers.norm(river) in rivers.ids()):
+        return "unknown river"
+    river = rivers.norm(river)
     if not is_num(r.get("km"), 0, KM_MAX):
         return "km out of range"
     if r.get("bank") not in BANKS:
@@ -154,7 +161,7 @@ def check(submitted, raw):
     if re.search(r"https?:|www\.|\.(com|net|org|au)\b", alias, re.I):
         alias = ""
     return {"submitted_aest": submitted, "time_aest": t.strftime("%Y-%m-%d %H:%M"),
-            "km": f"{r['km']:.1f}", "bank": r["bank"], "alias": alias,
+            "river": river, "km": f"{r['km']:.1f}", "bank": r["bank"], "alias": alias,
             "dir_kind": "river", "dir": r["dir"], "strength": "" if s is None else str(s),
             "speed_kmh": "" if r.get("speed_kmh") is None else f"{r['speed_kmh']:.1f}",
             "clarity": "" if c is None else str(c), "problems": ";".join(sorted(p)),
@@ -194,11 +201,12 @@ def main():
     folder.mkdir(parents=True, exist_ok=True)
     # Keep what's saved; a report fetched again replaces its saved copy. Hidden ones
     # go, whether saved or new.
-    ident = lambda r: (r["submitted_aest"], r["time_aest"], r["km"], r["bank"], r["dir"])
+    ident = lambda r: (r["submitted_aest"], r["time_aest"], r["river"], r["km"], r["bank"], r["dir"])
     saved = {}
     for old in sorted(folder.glob("*.csv")):
         with old.open(newline="") as f:
             for r in csv.DictReader(f):
+                r["river"] = rivers.norm(r.get("river"))   # saved before item 6: blank
                 saved[ident(r)] = r
         old.unlink()                     # rewritten in full below
     n_saved = len(saved)

@@ -38,6 +38,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import rivers
 
 # Default paths are relative to this script, so it works from any current folder.
 HERE = Path(__file__).parent
@@ -92,14 +93,15 @@ def check_steps(s, label):
     return s
 
 
-def load_stations(path):
+def load_stations(path, river=rivers.DEFAULT):
     """Stations with complete lag, ratio, MSL and chainage, ordered mouth -> upstream.
 
     The model reads only name, chainage_km, lag_min, ratio and msl_m. The other
     columns (lat, lon, lag_hw_min, lag_lw_min, range_m, note) are reference only:
     editing them does not change the output. lag_min is the mean of the HW and LW lags.
+    Only the given river's rows are used (column river; blank = brisbane).
     """
-    st = pd.read_csv(path)
+    st = rivers.only(pd.read_csv(path), river)
     need = ["chainage_km", "lag_min", "ratio", "msl_m"]
     # Mt Crosby Weir is expected here: it is not in the MSQ tables, so its row is blank.
     skipped = st[st[need].isna().any(axis=1)].name.tolist()
@@ -224,7 +226,7 @@ def ramp_places(path, end_km):
     """Boat ramps from data/ramps.csv inside the predicted reach (km 0 to end_km), for
     the page's Place list. Location references only: name and chainage, as on the
     report page."""
-    r = pd.read_csv(path)
+    r = rivers.only(pd.read_csv(path))
     r = r[(r.km >= 0) & (r.km <= end_km)].sort_values("km")
     return [{"name": n, "chainage_km": round(float(k), 2)} for n, k in zip(r.name, r.km)]
 
@@ -532,7 +534,7 @@ def main():
     kholo_km = float(st.chainage_km.max())
     end_km = kholo_km
     if args.sandbox:
-        features = pd.read_csv(DATA / "features.csv")
+        features = rivers.only(pd.read_csv(DATA / "features.csv"))
         end_km = float(features.loc[features.feature_id == SANDBOX_END_FEATURE, "km"].iloc[0])
         guesses = load_guesses(DATA / "guesses.csv")
     if args.out is None:
@@ -554,7 +556,7 @@ def main():
                             start_is_default, built,
                             ramp_places(args.ramps, pts.chainage_km.max()))
     if args.sandbox:
-        obs = pd.read_csv(DATA / "observations.csv", dtype=str).fillna("")
+        obs = rivers.only(pd.read_csv(DATA / "observations.csv", dtype=str).fillna(""))
         payload["sandbox"] = sandbox_block(guesses, features, obs, kholo_km, end_km)
         payload["sandbox"]["head"] = head_chart(full, bar_msl, st, features, obs, end_km)
     write_html(payload, args.template, args.out)

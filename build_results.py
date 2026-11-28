@@ -28,6 +28,7 @@ import pandas as pd
 
 from build_report import REPORT_KM_MAX, REPORTS_REF
 from river_tides import BRISBANE, DATA, HERE, load_bars, load_stations, station_labels, to_json, write_html
+import rivers
 
 TURN_MIN = 45              # as the report page: within this of high/low water = "near the turn"
 SCAN_H = 8                 # look this far either side for the nearest high or low water
@@ -126,7 +127,8 @@ def all_reports(ref=REPORTS_REF):
     for n in sorted(names):
         text = subprocess.run(["git", "-C", str(HERE), "show", f"{ref}:reports/{n}"],
                               check=True, capture_output=True, text=True).stdout
-        rows += list(csv.DictReader(io.StringIO(text)))
+        rows += [r for r in csv.DictReader(io.StringIO(text))
+                 if rivers.norm(r.get("river")) == rivers.DEFAULT]
     return sorted(rows, key=lambda r: r["time_aest"])
 
 
@@ -165,12 +167,12 @@ def matched_words(m, n):
 # --- The page's data ----------------------------------------------------------------
 
 def build_payload(built=None, reports_ref=REPORTS_REF):
-    st_all = pd.read_csv(DATA / "stations.csv")
+    st_all = rivers.only(pd.read_csv(DATA / "stations.csv"))
     st = load_stations(DATA / "stations.csv")
     bar = load_bars(sorted(DATA.glob("bar_*_10min.csv")))
     model = Model(st, bar)
-    features = pd.read_csv(DATA / "features.csv")
-    obs = pd.read_csv(DATA / "observations.csv", dtype=str).fillna("")
+    features = rivers.only(pd.read_csv(DATA / "features.csv"))
+    obs = rivers.only(pd.read_csv(DATA / "observations.csv", dtype=str).fillna(""))
     cl = pd.read_csv(DATA / "centreline.csv")
     river = cl[cl.chainage_km <= REPORT_KM_MAX + 0.5]
     rs = reaches(st, features)

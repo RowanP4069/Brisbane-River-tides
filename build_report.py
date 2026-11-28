@@ -42,6 +42,7 @@ from build_gauges import project_onto
 from collect_gauges import USER_AGENT
 from river_tides import (BRISBANE, DATA, HERE, load_bars, load_stations, station_labels,
                          to_json, write_html)
+import rivers
 
 # The Google Form the page posts to. The page sends two answers: "report", the part that
 # is published (JSON, see the page's buildReport()), and "private", which stays in the
@@ -105,9 +106,9 @@ def make_ramps():
         name = RAMP_NAMES.get(r["asset_id"], f"{r['street'].title()}, {r['suburb'].title()}")
         if "CANOE" in r["descriptio"]:
             name += " (canoe ramp)"
-        rows.append({"name": name, "lat": r["latitude"], "lon": r["longitude"],
+        rows.append({"name": name, "river": "brisbane", "lat": r["latitude"], "lon": r["longitude"],
                      "source": f"BCC {r['asset_id']}"})
-    rows += [{"name": g["name"], "lat": g["lat"], "lon": g["lon"],
+    rows += [{"name": g["name"], "river": "brisbane", "lat": g["lat"], "lon": g["lon"],
               "source": f"MSQ Beacon to Beacon {g['map']}"} for g in GUIDE_RAMPS]
     out = []
     for r in rows:
@@ -117,7 +118,7 @@ def make_ramps():
             out.append(dict(r, km=round(km, 2), lat=round(r["lat"], 6), lon=round(r["lon"], 6)))
     out.sort(key=lambda r: r["km"])
     with RAMPS_CSV.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["name", "km", "lat", "lon", "source"],
+        w = csv.DictWriter(f, fieldnames=["name", "river", "km", "lat", "lon", "source"],
                            lineterminator="\n")
         w.writeheader()
         w.writerows(out)
@@ -142,7 +143,7 @@ def recent_reports(today, ref=REPORTS_REF):
         text = subprocess.run(["git", "-C", str(HERE), "show", f"{ref}:reports/{n}"],
                               check=True, capture_output=True, text=True).stdout
         for r in csv.DictReader(io.StringIO(text)):
-            if r["time_aest"][:10] >= since:
+            if r["time_aest"][:10] >= since and rivers.norm(r.get("river")) == rivers.DEFAULT:
                 out.append({"time": r["time_aest"], "km": float(r["km"]), "bank": r["bank"],
                             "alias": r["alias"], "dir": r["dir"], "strength": int(r["strength"]),
                             "verdict": r["verdict"]})
@@ -179,7 +180,7 @@ def build_payload(built=None, today=None, reports_ref=REPORTS_REF):
         "river": {"lon": river.lon.round(6).tolist(), "lat": river.lat.round(6).tolist(),
                   "km": river.chainage_km.round(4).tolist()},
         "reports": recent_reports(today, reports_ref),
-        "ramps": pd.read_csv(RAMPS_CSV)[["name", "km", "lat", "lon"]].to_dict("records"),
+        "ramps": rivers.only(pd.read_csv(RAMPS_CSV))[["name", "km", "lat", "lon"]].to_dict("records"),
     }
 
 

@@ -463,7 +463,8 @@ function problems() {
 // to the nearest 50 m (so the daily job can recheck it). Version 1.
 function buildReport(ms, verdict, device) {
   const speed = parseFloat($("speed").value), clarity = picked("clarity");
-  return { v: 1, time: msIso(ms), km: Math.round(place.km * 10) / 10, bank: place.bank,
+  // river (item 6): always brisbane until the Bremer branch (19b) snaps to two lines.
+  return { v: 1, time: msIso(ms), river: "brisbane", km: Math.round(place.km * 10) / 10, bank: place.bank,
     off_m: place.off === null ? null : Math.round(place.off / 50) * 50,
     alias: $("alias").value.trim().slice(0, 30), dir_kind: "river", dir: picked("dir"),
     strength: picked("strength") === null ? null : +picked("strength"),

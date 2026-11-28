@@ -76,6 +76,7 @@ import pandas as pd
 
 from river_tides import (BRISBANE, DATA, HERE, add_corrections, heights, load_bars,
                          load_stations, to_json, write_html)
+import rivers
 
 BAR_GAUGE = "046046A"           # MSQ station number for Brisbane Bar (collect_gauges.py)
 
@@ -141,7 +142,7 @@ def read_branch(ref, folder):
 def gauge_list(stations):
     """The Bar plus the council gauges, with the model's lag, ratio and MSL at each,
     and the published HW and LW lags interpolated the same way (for comparison only)."""
-    g = pd.read_csv(DATA / "gauges.csv", dtype={"sensor_id": str})
+    g = rivers.only(pd.read_csv(DATA / "gauges.csv", dtype={"sensor_id": str}))
     bar = pd.DataFrame([{"sensor_id": BAR_GAUGE, "short": "Bar", "name": "Brisbane Bar",
                          "chainage_km": 0.0}])
     g = pd.concat([bar, g[["sensor_id", "short", "name", "chainage_km"]]],
