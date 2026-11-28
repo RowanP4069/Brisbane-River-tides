@@ -1,27 +1,41 @@
-gauge,name,datum
-040387,Linville,LGH
-040441,Lowood,LGH
-040713,Jindalee (Centenary Bridge),AHD
-040812,Moggill,AHD
-140004,Eleanor Schonell Bridge (UQ),AHD
-540063,Colleges Crossing,LGH
-540139,Gregor Creek,LGH
-540150,Savages Crossing,LGH
-540177,Wivenhoe Dam HG,AHD
-540178,Wivenhoe Dam TW,AHD
-540182,Lowood,LGH
-540183,Lowood Pump Stn,LGH
-540188,Devon Hills,LGH
-540192,Jindalee Alert,AHD
-540198,Brisbane City,AHD
-540199,Mt Crosby,LGH
-540201,Moggill (Aitcheson St East),AHD
-540256,Kholo Bridge,LGH
-540257,Burtons Bridge Alert,LGH
-540261,Linville Alert,LGH
-540670,Goodna,LGH
-540682,Jindalee (Boat Ramp Park),AHD
-540683,St Lucia,AHD
-540684,Brisbane Port Office,AHD
-540685,Hawthorne,AHD
-540702,Milton (Coronation Drive),AHD
+gauge,name,datum,river
+040387,Linville,LGH,brisbane
+040441,Lowood,LGH,brisbane
+040702,Stokes Crossing,LGH,bremer
+040713,Jindalee (Centenary Bridge),AHD,brisbane
+040812,Moggill,AHD,brisbane
+040831,Ipswich,LGH,bremer
+040836,One Mile Bridge,AHD,bremer
+040838,Three Mile Bridge,AHD,bremer
+140004,Eleanor Schonell Bridge (UQ),AHD,brisbane
+540063,Colleges Crossing,LGH,brisbane
+540139,Gregor Creek,LGH,brisbane
+540147,Five Mile Bridge,LGH,bremer
+540150,Savages Crossing,LGH,brisbane
+540157,Adams Bridge,LGH,bremer
+540177,Wivenhoe Dam HG,AHD,brisbane
+540178,Wivenhoe Dam TW,AHD,brisbane
+540182,Lowood,LGH,brisbane
+540183,Lowood Pump Stn,LGH,brisbane
+540188,Devon Hills,LGH,brisbane
+540192,Jindalee Alert,AHD,brisbane
+540198,Brisbane City,AHD,brisbane
+540199,Mt Crosby,LGH,brisbane
+540201,Moggill (Aitcheson St East),AHD,brisbane
+540216,Berry's Lagoon,AHD,bremer
+540250,Brassall (Hancocks Bridge),LGH,bremer
+540256,Kholo Bridge,LGH,brisbane
+540257,Burtons Bridge Alert,LGH,brisbane
+540261,Linville Alert,LGH,brisbane
+540314,Spressers Bridge,LGH,bremer
+540388,Rosewood,LGH,bremer
+540504,Walloon,LGH,bremer
+540574,Lower Mt Walker,LGH,bremer
+540661,Karalee,LGH,bremer
+540669,Seven Mile Bridge,AHD,bremer
+540670,Goodna,LGH,brisbane
+540682,Jindalee (Boat Ramp Park),AHD,brisbane
+540683,St Lucia,AHD,brisbane
+540684,Brisbane Port Office,AHD,brisbane
+540685,Hawthorne,AHD,brisbane
+540702,Milton (Coronation Drive),AHD,brisbane
