@@ -92,17 +92,32 @@ GUIDE_RAMPS = [
     {"name": "Barellan Point", "lat": -27.54097, "lon": 152.85134, "map": "BR-2"},
     {"name": "Colleges Crossing", "lat": -27.55632, "lon": 152.80024, "map": "BR-1"},
 ]
+# Bremer River access points (item 19b), as listed on Ipswich City Council's
+# 'Canoeing and kayaking' page (read 2026-11-28; names only, the page has no licence),
+# placed from OpenStreetMap (ODbL). The Shapcott Park slipway is unnamed in OSM: taken
+# to be the park's canoe launch from its place (Coalfalls, a short way above the rock
+# race, as Global Paddler describes). Joseph Brady Park has no slipway in OSM: placed
+# at the park's centre.
+OSM_RAMPS = [
+    {"name": "North Ipswich Boat Ramp (Cribb Park)", "river": "bremer",
+     "lat": -27.60318, "lon": 152.76685, "osm": "way 398340985 (slipway)"},
+    {"name": "Shapcott Park canoe launch, Coalfalls", "river": "bremer",
+     "lat": -27.60494, "lon": 152.73766, "osm": "way 398687874 (unnamed slipway)"},
+    {"name": "Joseph Brady Park, Barellan Point (canoe access)", "river": "bremer",
+     "lat": -27.58118, "lon": 152.85338, "osm": "way 442032093 (park centre)"},
+]
 # The council's names for ramps that are better known by a park's name.
 RAMP_NAMES = {"RA1011": "Kookaburra Park, Karana Downs"}
 RAMP_MAX_OFF_M = 350              # on the river itself (not up a creek), as MAX_OFF_M
 
 
 def make_ramps():
-    """Write data/ramps.csv: council ramps on the river itself, plus GUIDE_RAMPS."""
+    """Write data/ramps.csv: council ramps on the river itself, plus GUIDE_RAMPS and
+    OSM_RAMPS, each projected onto its own river's centreline."""
     req = urllib.request.Request(BCC_RAMPS_URL, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=120) as resp:
         bcc = json.load(resp)
-    cl = pd.read_csv(DATA / "centreline.csv")
+    lines = {rid: pd.read_csv(DATA / row["centreline"]) for rid, row in rivers.load().items()}
     rows = []
     for r in bcc:
         name = RAMP_NAMES.get(r["asset_id"], f"{r['street'].title()}, {r['suburb'].title()}")
@@ -112,13 +127,16 @@ def make_ramps():
                      "source": f"BCC {r['asset_id']}"})
     rows += [{"name": g["name"], "river": "brisbane", "lat": g["lat"], "lon": g["lon"],
               "source": f"MSQ Beacon to Beacon {g['map']}"} for g in GUIDE_RAMPS]
+    rows += [{"name": o["name"], "river": o["river"], "lat": o["lat"], "lon": o["lon"],
+              "source": f"Ipswich City Council; OpenStreetMap {o['osm']}"} for o in OSM_RAMPS]
     out = []
     for r in rows:
-        km, off = project_onto(cl, r["lon"], r["lat"])
+        km, off = project_onto(lines[r["river"]], r["lon"], r["lat"])
         # On the river (not up a creek or on the bay), up to where reports are taken.
-        if off <= RAMP_MAX_OFF_M and km <= REPORT_KM_MAX:
+        if off <= RAMP_MAX_OFF_M and km <= rivers.report_km_max(r["river"]):
             out.append(dict(r, km=round(km, 2), lat=round(r["lat"], 6), lon=round(r["lon"], 6)))
-    out.sort(key=lambda r: r["km"])
+    order = list(rivers.load())
+    out.sort(key=lambda r: (order.index(r["river"]), r["km"]))     # Brisbane first
     with RAMPS_CSV.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["name", "river", "km", "lat", "lon", "source"],
                            lineterminator="\n")
@@ -198,7 +216,8 @@ def build_payload(built=None, today=None, reports_ref=REPORTS_REF):
         "stations": station_labels(st, DATA / "centreline.csv"),
         "rivers": river_list,
         "reports": recent_reports(today, reports_ref),
-        "ramps": rivers.only(pd.read_csv(RAMPS_CSV))[["name", "km", "lat", "lon"]].to_dict("records"),
+        "ramps": pd.read_csv(RAMPS_CSV).assign(river=lambda d: d.river.map(rivers.norm))
+                   [["name", "river", "km", "lat", "lon"]].to_dict("records"),
     }
 
 

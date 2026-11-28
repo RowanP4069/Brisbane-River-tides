@@ -357,7 +357,7 @@ $("riverIn").addEventListener("change", useKm);
 // Boat ramps, downstream to upstream, as quick places to jump to.
 const RAMPS = DATA.ramps;
 RAMPS.forEach((r, i) => {
-  const o = document.createElement("option"); o.value = i; o.textContent = `km ${r.km.toFixed(1)}: ${r.name}`;
+  const o = document.createElement("option"); o.value = i; o.textContent = `${kmWords(r.km, r.river)}: ${r.name}`;
   $("rampIn").appendChild(o);
 });
 function useRamp(i) {
