@@ -15,7 +15,9 @@ files on the gauge-data branch:
                        The source keeps 7 days. Also stores the official prediction.
   bom/YYYY-MM.csv      Bureau of Meteorology river heights for the Brisbane River gauges
                        (station names starting "Brisbane River at", e.g. 540063 Colleges
-                       Crossing, 540256 Kholo Bridge), from the Brisbane basin river height
+                       Crossing, 540256 Kholo Bridge) and, since 2026-11-28, the Bremer
+                       River gauges ("Bremer River at", e.g. 040831 Ipswich, 540661
+                       Karalee), from the Brisbane basin river height
                        bulletin IDQ60286 on BoM's public anonymous FTP. The bulletin holds
                        only each gauge's LATEST reading, so this source is also run every
                        15 min (.github/workflows/collect-bom.yml). Metres, on the datum the
@@ -88,7 +90,10 @@ CDS_SITES = {
 # products (its README: ftp://ftp.bom.gov.au/anon/gen/README). The web pages
 # (bom.gov.au) refuse scripts, so they are never fetched here.
 BOM_URL = "ftp://ftp.bom.gov.au/anon/gen/fwo/IDQ60286.html"
-BOM_PREFIX = "Brisbane River at "
+# Gauges kept from the bulletin, by name prefix -> river id (data/rivers.csv). The
+# Bremer was added 2026-11-28 ahead of roadmap item 19 (Bremer River branch): its lower
+# gauges may be tidal, and the upper ones are freshwater inputs (item 9).
+BOM_RIVERS = {"Brisbane River at ": "brisbane", "Bremer River at ": "bremer"}
 
 FIELDS = ["time_aest", "gauge", "value_m"]
 CDS_FIELDS = FIELDS + ["prediction_m"]
@@ -185,17 +190,18 @@ def parse_bom(page):
         cells = [html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", c))).strip()
                  for c in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)]
         sid = re.search(r"IDQ65389\.(\w+)\.tbl", tr)
-        if len(cells) != 9 or not sid or not cells[0].startswith(BOM_PREFIX):
+        prefix = next((p for p in BOM_RIVERS if cells and cells[0].startswith(p)), None)
+        if len(cells) != 9 or not sid or prefix is None:
             continue
         name, _, when, height, datum = cells[:5]
-        stations[sid.group(1)] = (name[len(BOM_PREFIX):], datum)
+        stations[sid.group(1)] = (name[len(prefix):], datum, BOM_RIVERS[prefix])
         if not when or not height:
             continue                      # manual gauge, or no reading at present
         t = bom_reading_time(when, issued)
         if t is not None:
             rows.append((fmt(t), sid.group(1), f"{float(height):.3f}", datum))
     if not stations:
-        raise ValueError("no Brisbane River gauges found: has the bulletin's layout changed?")
+        raise ValueError("no Brisbane or Bremer River gauges found: has the bulletin's layout changed?")
     return rows, stations
 
 
@@ -206,20 +212,23 @@ def fetch_bom():
 
 
 def write_bom_stations(folder, stations):
-    """bom/stations.csv: every Brisbane River gauge seen in the bulletin, merged with
-    any listed before (a gauge can drop out of the bulletin for a while)."""
+    """bom/stations.csv: every kept gauge seen in the bulletin, merged with any listed
+    before (a gauge can drop out of the bulletin for a while). The name is without its
+    "<River> River at " prefix; the river column says which (blank in files written
+    before 2026-11-28 means brisbane)."""
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / "stations.csv"
     old = {}
     if path.exists():
         with path.open(newline="") as f:
-            old = {r["gauge"]: (r["name"], r["datum"]) for r in csv.DictReader(f)}
+            old = {r["gauge"]: (r["name"], r["datum"], r.get("river") or "brisbane")
+                   for r in csv.DictReader(f)}
     old.update(stations)
     with path.open("w", newline="") as f:
         w = csv.writer(f, lineterminator="\n")
-        w.writerow(["gauge", "name", "datum"])
-        for g, (n, d) in sorted(old.items()):
-            w.writerow([g, n, d])
+        w.writerow(["gauge", "name", "datum", "river"])
+        for g, (n, d, r) in sorted(old.items()):
+            w.writerow([g, n, d, r])
 
 
 def merge(folder, rows, fields=FIELDS):
